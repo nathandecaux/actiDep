@@ -1,0 +1,14 @@
+README.md
+pyproject.toml
+setup.py
+actiDep/__init__.py
+actiDep/core.py
+actiDep/set_config.py
+actiDep.egg-info/PKG-INFO
+actiDep.egg-info/SOURCES.txt
+actiDep.egg-info/dependency_links.txt
+actiDep.egg-info/requires.txt
+actiDep.egg-info/top_level.txt
+actiDep/utils/__init__.py
+tests/__init__.py
+tests/test_core.py
