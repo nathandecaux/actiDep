@@ -7,15 +7,15 @@ import sys
 import pathlib
 from subprocess import call
 from actiDep.set_config import set_config
-from actiDep.data.loader import Subject, move2nii, parse_filename, ActiDepFile
-from actiDep.data.io import copy2nii,copy_from_dict
-from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli,CLIArg
+from actiDep.data.loader import Subject, move2nii, parse_filename, ActiDepFile, copy2nii
+from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli, CLIArg, run_anima_command
 import SimpleITK as sitk
 import json
 import tempfile
 import glob
 import shutil
 import ants
+import xml.etree.ElementTree as ET
 
 def read_mcm_file(mcm_file):
     """
@@ -31,8 +31,6 @@ def read_mcm_file(mcm_file):
     dict
         Dictionary containing weights file and compartment information
     """
-    import xml.etree.ElementTree as ET
-    
     tree = ET.parse(mcm_file)
     root = tree.getroot()
     
@@ -50,7 +48,7 @@ def read_mcm_file(mcm_file):
     return model
 
 
-def mcm_estimator(dwi,bval,bvec,mask,n_comparts,**kwargs):
+def mcm_estimator(dwi, bval, bvec, mask, n_comparts, **kwargs):
     """
     Calls the animaMCMEstimator to estimate the MCM coefficients from the DWI data.
 
@@ -62,77 +60,92 @@ def mcm_estimator(dwi,bval,bvec,mask,n_comparts,**kwargs):
         The bval file associated with the DWI data
     bvec : ActiDepFile
         The bvec file associated with the DWI data
-    mask : ActiDepFile (optional)
+    mask : ActiDepFile
         Brain mask to use for the estimation
     n_comparts : int
         Number of anisotropic compartments to estimate
     kwargs : dict  
-        Additional arguments to pass to the script (eg: )
+        Additional arguments to pass to the script
     """
-
-    # Set the config
-    config, tools = set_config()
-    # Set the path to the DWI data
-    tmp_folder = "/tmp/tmppk1svvog"#tempfile.mkdtemp()
-    os.chdir(tmp_folder)
-
-    # Copy the DWI data to the temporary folder
-    dwi_tmp = copy2nii(dwi.path, opj(tmp_folder, 'dwi.nii.gz'))
-    bval_tmp = copy2nii(bval.path, opj(tmp_folder, 'dwi.bval'))
-    bvec_tmp = copy2nii(bvec.path, opj(tmp_folder, 'dwi.bvec'))
-    mask_tmp = copy2nii(mask.path, opj(tmp_folder, 'mask.nii.gz'))
-
-    command = [
-        "animaMCMEstimator",
-        "-b", bval_tmp,
-        "-g", bvec_tmp,
-        "-i", dwi_tmp,
-        "-m", mask_tmp,
+    # Préparer les entrées
+    inputs = {
+        "dwi": dwi,
+        "bval": bval,
+        "bvec": bvec,
+        "mask": mask
+    }
+    
+    # Construire les arguments de commande avec des références symboliques (copie les fichiers dans un dossier temporaire)
+    command_args = [
+        "-b", "$bval",
+        "-g", "$bvec",
+        "-i", "$dwi",
+        "-m", "$mask",
         "-o", "mcm.nii.gz",
         "-n", str(n_comparts)
     ]
+    
+    # Définir les sorties attendues (pattern de base, sera complété après exécution)
+    output_pattern = {
+        'mcm.nii.mcm': {"model": "MCM", "extension": ".mcm"}
+    }
 
-    command = add_kwargs_to_cli(command, **kwargs)
-
-    print(command)
-    call(command)
-
-    print('MCM estimation done')
-
-    print(tmp_folder)
-    base_entities = dwi.get_entities()
+    # Exécuter la commande
+    result = run_anima_command(
+        "animaMCMEstimator",
+        inputs,
+        output_pattern,
+        dwi,
+        command_args=command_args,
+        **kwargs
+    )
+    
+    # Chemin vers le fichier MCM généré
+    mcm_file = next(path for path in result.keys() if path.endswith('.mcm'))
+    
+    # Lire le modèle MCM pour identifier les compartiments
+    mcm_model = read_mcm_file(mcm_file)
+    tmp_folder = os.path.dirname(mcm_file)
+    
+    # Ajouter les compartiments au dictionnaire de résultats
+    base_entities = dwi.get_entities() if isinstance(dwi, ActiDepFile) else dwi.copy()
     base_entities = upt_dict(base_entities, model='MCM', extension='nii.gz')
     
-    res_dict = {
-        'mcm.nii.mcm': upt_dict(base_entities,extension='.mcm')
-    }
-    
-    # Read MCM file
-    mcm_model = read_mcm_file(opj(tmp_folder, 'mcm.nii.mcm'))
-    
-    # Add compartment files to result dictionary
+    # Ajouter les fichiers de compartiments
     for comp in mcm_model['compartments']:
         comp_path = opj('mcm.nii', comp['filename'])
         comp_num = comp['filename'].split('_')[-1].split('.')[0]  # Get number from filename
-        res_dict[comp_path] = upt_dict(base_entities, compartment=comp_num, extension='.nii.gz',desc=comp['type'].lower())
+        result[opj(tmp_folder, comp_path)] = upt_dict(
+            base_entities.copy(), 
+            compartment=comp_num, 
+            extension='.nii.gz',
+            desc=comp['type'].lower()
+        )
     
-    res_dict['mcm.nii/mcm.nii_weights.nrrd'] = upt_dict(base_entities,extension='.nii.gz',model='MCM',desc='weights')
+    # Ajouter le fichier de poids
+    result[opj(tmp_folder, 'mcm.nii/mcm.nii_weights.nrrd')] = upt_dict(
+        base_entities.copy(), 
+        extension='.nii.gz',
+        model='MCM',
+        desc='weights'
+    )
     
-    # Add the tmp_folder to the keys
-    res_dict = {opj(tmp_folder, k): v for k, v in res_dict.items()}
-    return res_dict
+    return result
 
 
 if __name__ == "__main__":
-    config,tools = set_config()
+    config, tools = set_config()
     subject = Subject('03011')
-    dwi = subject.get_unique(suffix='dwi', desc='preproc', pipeline='anima_preproc',extension='nii.gz')
+    dwi = subject.get_unique(suffix='dwi', desc='preproc', pipeline='anima_preproc', extension='nii.gz')
     bval = subject.get_unique(extension='bval')
     bvec = subject.get_unique(extension='bvec', desc='preproc')
     mask = subject.get_unique(suffix='mask', label='brain', datatype='dwi')
-    res_dict=mcm_estimator(dwi,bval,bvec,mask,3,R=True,F=True,S=True,c=2,ml_mode=CLIArg('ml-mode',2),opt=CLIArg('optimizer','levenberg'))
-    pprint(res_dict)
-
-    copy_from_dict(subject,res_dict,pipeline='mcm_zeppelin_test',dry_run=False)
     
-
+    res_dict = mcm_estimator(
+        dwi, bval, bvec, mask, 3,
+        R=True, F=True, S=True, c=2, 
+        ml_mode=CLIArg('ml-mode', 2),
+        opt=CLIArg('optimizer', 'levenberg')
+    )
+    
+    pprint(res_dict)

@@ -4,9 +4,201 @@ from os.path import join as opj
 from pathlib import Path
 import pathlib
 from os.path import join as opj
-from bids.layout import BIDSFile
+from ..data.io import copy2nii
+from ..set_config import set_config
+from subprocess import call
 import shutil
+import tempfile
+import time
+def run_cli_command(command_name, inputs, output_pattern, entities_template, 
+                   prepare_inputs_fn=None, command_args=None, **kwargs):
+    """
+    Fonction générique pour exécuter une commande CLI sur des fichiers d'entrée
+    et retourner les résultats structurés.
 
+    Parameters
+    ----------
+    command_name : str
+        Nom de la commande à exécuter
+    inputs : dict
+        Dictionnaire associant un nom à chaque fichier d'entrée ActiDepFile
+        {"dwi": dwi_file, "bval": bval_file, ...}
+    output_pattern : dict
+        Dictionnaire associant les noms de fichiers de sortie à leurs entités
+        {"output.nii.gz": {"label": "WM"}, ...}
+    entities_template : dict ou ActiDepFile
+        Entités de base à utiliser pour construire les entités de sortie
+    prepare_inputs_fn : callable, optional
+        Fonction pour préparer les entrées avant l'exécution (ex: inverser les bvecs)
+    command_args : list, optional
+        Liste des arguments spécifiques à la commande (remplace la construction automatique)
+        Les références symboliques sous forme de "$nom_input" seront remplacées par les chemins temporaires
+    **kwargs : 
+        Arguments additionnels à passer à la commande
+    
+    Returns
+    -------
+    dict
+        Dictionnaire associant les chemins complets des fichiers de sortie à leurs entités
+    """
+    # Configuration et création du dossier temporaire
+    config, tools = set_config()
+    tmp_folder = tempfile.mkdtemp()
+    os.chdir(tmp_folder)
+    
+    # Copie des fichiers d'entrée
+    tmp_inputs = {}
+    for name, file_obj in inputs.items():
+        if file_obj is None:
+            tmp_inputs[name] = None
+            continue
+            
+        if isinstance(file_obj, str):
+            # Si c'est déjà un chemin de fichier
+            tmp_inputs[name] = file_obj
+        else:
+            tmp_path = opj(tmp_folder, f'{name}{file_obj.extension}')
+            tmp_inputs[name] = copy2nii(file_obj.path, tmp_path)
+   
+    
+    # Application de la fonction de préparation si nécessaire
+    if prepare_inputs_fn:
+        prepare_inputs_fn(tmp_inputs)
+    
+    # Construction de la commande
+    command = [command_name]
+    
+    if command_args:
+        # Remplacer les références symboliques par les chemins temporaires
+        processed_args = []
+        for arg in command_args:
+            if isinstance(arg, str) and arg.startswith('$'):
+                # Extraire le nom de l'entrée (sans le $)
+                input_name = arg[1:]
+                if input_name in tmp_inputs and tmp_inputs[input_name] is not None:
+                    processed_args.append(tmp_inputs[input_name])
+                else:
+                    # Si l'entrée n'existe pas, on conserve l'argument tel quel
+                    processed_args.append(arg)
+            else:
+                processed_args.append(arg)
+        
+        command.extend(processed_args)
+    else:
+        # Construction par défaut en ajoutant simplement les fichiers d'entrée
+        for input_path in tmp_inputs.values():
+            if input_path:  # Ne pas ajouter les entrées None
+                command.append(input_path)
+    
+    # Ajout des kwargs à la commande
+    command = add_kwargs_to_cli(command, **kwargs)
+    print(command)
+    print(f"Running command: {' '.join(command)}")
+    
+    # Exécution de la commande
+    call(command)
+
+    time.sleep(1)
+    
+    print(f"{command_name} done")
+    
+    # Préparation des entités de base pour les sorties
+    if isinstance(entities_template, dict):
+        base_entities = entities_template
+    else:
+        # Si c'est un ActiDepFile, on récupère ses entités
+        base_entities = entities_template.get_entities()
+    
+    # Construction du dictionnaire de résultats
+    res_dict = {opj(tmp_folder, output_file): upt_dict(base_entities.copy(), **entity_updates) 
+                for output_file, entity_updates in output_pattern.items()}
+    
+    return res_dict
+
+def run_anima_command(command_name, inputs, output_pattern, entities_template, 
+                      prepare_inputs_fn=None, command_args=None, **kwargs):
+    """
+    Fonction spécifique pour exécuter une commande Anima sur des fichiers d'entrée.
+
+    Parameters
+    ----------
+    command_name : str
+        Nom de la commande Anima à exécuter
+    inputs : dict
+        Dictionnaire associant un nom à chaque fichier d'entrée
+    output_pattern : dict
+        Dictionnaire associant les noms de fichiers de sortie à leurs entités
+    entities_template : dict ou ActiDepFile
+        Entités de base à utiliser pour construire les entités de sortie
+    prepare_inputs_fn : callable, optional
+        Fonction pour préparer les entrées avant l'exécution
+    command_args : list, optional
+        Liste des arguments spécifiques à la commande Anima
+    **kwargs : 
+        Arguments additionnels à passer à la commande
+    
+    Returns
+    -------
+    dict
+        Dictionnaire associant les chemins complets des fichiers de sortie à leurs entités
+    """
+    return run_cli_command(
+        command_name,
+        inputs,
+        output_pattern,
+        entities_template,
+        prepare_inputs_fn=prepare_inputs_fn,
+        command_args=command_args,
+        **kwargs
+    )
+
+
+
+def run_mrtrix_command(command_name, inputs, output_pattern, entities_template, 
+                      prepare_inputs_fn=None, command_args=None, **kwargs):
+    """
+    Fonction spécifique pour exécuter une commande MRtrix3 sur des fichiers d'entrée.
+    Ajoute automatiquement le flag '-force' aux commandes MRtrix3.
+
+    Parameters
+    ----------
+    command_name : str
+        Nom de la commande MRtrix3 à exécuter
+    inputs : dict
+        Dictionnaire associant un nom à chaque fichier d'entrée
+    output_pattern : dict
+        Dictionnaire associant les noms de fichiers de sortie à leurs entités
+    entities_template : dict ou ActiDepFile
+        Entités de base à utiliser pour construire les entités de sortie
+    prepare_inputs_fn : callable, optional
+        Fonction pour préparer les entrées avant l'exécution
+    command_args : list, optional
+        Liste des arguments spécifiques à la commande MRtrix3
+    **kwargs : 
+        Arguments additionnels à passer à la commande
+    
+    Returns
+    -------
+    dict
+        Dictionnaire associant les chemins complets des fichiers de sortie à leurs entités
+    """
+    # Ajouter le flag -force automatiquement si pas déjà présent dans command_args
+    if command_args and '-force' not in command_args:
+        command_args = command_args + ['-force']
+    elif not command_args:
+        command_args = ['-force']
+        
+    return run_cli_command(
+        command_name,
+        inputs,
+        output_pattern,
+        entities_template,
+        prepare_inputs_fn=prepare_inputs_fn,
+        command_args=command_args,
+        **kwargs
+    )
+
+        
 def del_key(dct, key):
     d = dct.copy()
     del d[key]

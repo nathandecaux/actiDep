@@ -29,6 +29,8 @@ def process_msmt_csd(subject):
 
     if 'init' in pipeline_list:
         create_pipeline_description(pipeline, layout=subject.layout, registrationMethod='antsRegistrationSyNQuick.sh', registrationParams='default', exactParams={'-d': '3'})
+
+    
    
         
         

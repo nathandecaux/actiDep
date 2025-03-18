@@ -7,8 +7,9 @@ import sys
 import pathlib
 from subprocess import call
 from actiDep.set_config import set_config
+from actiDep.data.io import FixelFile
 from actiDep.data.loader import Subject, move2nii, parse_filename, ActiDepFile, copy2nii
-from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli
+from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli, run_cli_command, run_mrtrix_command
 import SimpleITK as sitk
 import json
 import tempfile
@@ -16,13 +17,17 @@ import glob
 import shutil
 import ants
 import dipy
+import nibabel as nib
 
 
 def do_inverse_bvec(bvec_tmp):
+    print(f"Inverting bvec file {bvec_tmp}")
     bvec = np.loadtxt(bvec_tmp)
     bvec[0, :] = -bvec[0, :]
     np.savetxt(bvec_tmp, bvec, fmt='%.18e')
 
+
+# Implémentation des fonctions spécifiques de MRtrix3
 
 def get_tissue_responses(dwi, bval, bvec, mask=None, inverse_bvec=True, **kwargs):
     """
@@ -34,68 +39,54 @@ def get_tissue_responses(dwi, bval, bvec, mask=None, inverse_bvec=True, **kwargs
         The DWI data to estimate the responses from
     bval : ActiDepFile
         The bval file associated with the DWI data
-
     bvec : ActiDepFile
         The bvec file associated with the DWI data
-
     mask : ActiDepFile (optional)
         Brain mask to use for the estimation
-
     inverse_bvec : bool (optional)
         Whether to invert the y component of the bvec file. Default is True.
     """
-
-    # Set the config
-    config, tools = set_config()
-    # Set the path to the DWI data
-    tmp_folder = tempfile.mkdtemp()
-    os.chdir(tmp_folder)
-
-    # Copy the DWI data to the temporary folder
-    dwi_tmp = copy2nii(dwi.path, opj(tmp_folder, 'dwi.nii.gz'))
-    bval_tmp = copy2nii(bval.path, opj(tmp_folder, 'dwi.bval'))
-    bvec_tmp = copy2nii(bvec.path, opj(tmp_folder, 'dwi.bvec'))
-
-    if inverse_bvec:
-        do_inverse_bvec(bvec_tmp)
-
-    # Run the response estimation
-    command = [
-        'dwi2response',
-        'dhollander',
-        dwi_tmp,
-        # Sortie pour WM (matière blanche)
-        opj(tmp_folder, 'response_sfwm.txt'),
-        opj(tmp_folder, 'response_gm.txt'),    # Sortie pour GM (matière grise)
-        # Sortie pour CSF (liquide cérébrospinal)
-        opj(tmp_folder, 'response_csf.txt'),
-        '-fslgrad', bvec_tmp, bval_tmp,        # Gradients au format FSL
-        '-force'
-    ]
-
-    command = add_kwargs_to_cli(command, **kwargs)
-
-    if mask is not None:
-        mask_tmp = copy2nii(mask.path, opj(tmp_folder, 'brain_mask.nii.gz'))
-        command += ['-mask', mask_tmp]
-
-    call(command)
-
-    print('Response estimation done')
-
-    base_entities = dwi.get_entities()
-    base_entities = upt_dict(base_entities, suffix='response', extension='txt')
-
-    res_dict = {
-        'response_sfwm.txt': upt_dict(base_entities, label='WM'),
-        'response_gm.txt': upt_dict(base_entities, label='GM'),
-        'response_csf.txt': upt_dict(base_entities, label='CSF')
+    inputs = {
+        "dwi": dwi,
+        "bval": bval,
+        "bvec": bvec,
+        "mask": mask
     }
 
-    # Add the tmp_folder to the keys
-    res_dict = {opj(tmp_folder, k): v for k, v in res_dict.items()}
+    def prepare_inputs(tmp_inputs):
+        if inverse_bvec and tmp_inputs["bvec"]:
+            do_inverse_bvec(tmp_inputs["bvec"])
 
-    return res_dict
+    command_args = [
+        'dhollander',
+        inputs["dwi"].path,
+        'response_sfwm.txt',
+        'response_gm.txt',
+        'response_csf.txt',
+        '-fslgrad',
+        '$bvec',
+        inputs["bval"].path
+    ]
+
+    if mask:
+        command_args.extend(['-mask',
+                            mask.path])
+
+    output_pattern = {
+        'response_sfwm.txt': {"suffix": "response", "extension": "txt", "label": "WM"},
+        'response_gm.txt': {"suffix": "response", "extension": "txt", "label": "GM"},
+        'response_csf.txt': {"suffix": "response", "extension": "txt", "label": "CSF"}
+    }
+
+    return run_mrtrix_command(
+        'dwi2response',
+        inputs,
+        output_pattern,
+        dwi.get_entities(),
+        prepare_inputs_fn=prepare_inputs,
+        command_args=command_args,
+        **kwargs
+    )
 
 
 def get_msmt_csd(dwi, bval, bvec, csf_response, gm_response, wm_response, mask=None, inverse_bvec=True, **kwargs):
@@ -121,107 +112,87 @@ def get_msmt_csd(dwi, bval, bvec, csf_response, gm_response, wm_response, mask=N
     inverse_bvec : bool (optional)
         Whether to invert the y component of the bvec file. Default is True.
     """
-
-    # Set the config
-    config, tools = set_config()
-    # Set the path to the DWI data
-    tmp_folder = tempfile.mkdtemp()
-    os.chdir(tmp_folder)
-
-    # Copy the DWI data to the temporary folder
-    dwi_tmp = copy2nii(dwi.path, opj(tmp_folder, 'dwi.nii.gz'))
-    bval_tmp = copy2nii(bval.path, opj(tmp_folder, 'dwi.bval'))
-    bvec_tmp = copy2nii(bvec.path, opj(tmp_folder, 'dwi.bvec'))
-    wm_tmp = copy2nii(wm_response.path, opj(tmp_folder, 'wm_response.txt'))
-    gm_tmp = copy2nii(gm_response.path, opj(tmp_folder, 'gm_response.txt'))
-    csf_tmp = copy2nii(csf_response.path, opj(tmp_folder, 'csf_response.txt'))
-
-    if inverse_bvec:
-        do_inverse_bvec(bvec_tmp)
-
-    # Run the response estimation
-    command = [
-        'dwi2fod',
-        'msmt_csd',
-        dwi_tmp,
-        '-fslgrad', bvec_tmp, bval_tmp,        # Gradients au format FSL
-        '-force'
-    ]
-
-    command = add_kwargs_to_cli(command, **kwargs)
-
-    if mask is not None:
-        mask_tmp = copy2nii(mask.path, opj(tmp_folder, 'brain_mask.nii.gz'))
-        command += ['-mask', mask_tmp]
-
-    for i, response in enumerate(['csf', 'gm', 'wm']):
-        command += [opj(tmp_folder, f'{response}_response.txt'),
-                    opj(tmp_folder, f'{response}_fod.nii.gz')]
-
-    call(command)
-
-    print('MSMT-CSD done')
-
-    base_entities = dwi.get_entities()
-    base_entities = upt_dict(base_entities, model='fod', extension='nii.gz')
-
-    res_dict = {
-        'csf_fod.nii.gz': upt_dict(base_entities, label='CSF'),
-        'gm_fod.nii.gz': upt_dict(base_entities, label='GM'),
-        'wm_fod.nii.gz': upt_dict(base_entities, label='WM')
+    inputs = {
+        "dwi": dwi,
+        "bval": bval,
+        "bvec": bvec,
+        "wm_response": wm_response,
+        "gm_response": gm_response,
+        "csf_response": csf_response,
+        "mask": mask
     }
 
-    # Add the tmp_folder to the keys
-    res_dict = {opj(tmp_folder, k): v for k, v in res_dict.items()}
+    def prepare_inputs(tmp_inputs):
+        if inverse_bvec and tmp_inputs["bvec"]:
+            do_inverse_bvec(tmp_inputs["bvec"])
 
-    return res_dict
+    command_args = [
+        'msmt_csd',
+        inputs["dwi"].path,
+        '-fslgrad',
+        "$bvec",
+        inputs["bval"].path
+    ]
+
+    if mask:
+        command_args.extend(['-mask',
+                             mask.path])
+    for tissue, resp_file in [("csf", csf_response), ("gm", gm_response), ("wm", wm_response)]:
+        command_args.extend([resp_file.path, f'{tissue}_fod.nii.gz'])
+
+    output_pattern = {
+        'csf_fod.nii.gz': {"model": "fod", "extension": "nii.gz", "label": "CSF", "suffix": "fod"},
+        'gm_fod.nii.gz': {"model": "fod", "extension": "nii.gz", "label": "GM", "suffix": "fod"},
+        'wm_fod.nii.gz': {"model": "fod", "extension": "nii.gz", "label": "WM", "suffix": "fod"}
+    }
+
+    return run_mrtrix_command(
+        'dwi2fod',
+        inputs,
+        output_pattern,
+        dwi.get_entities(),
+        prepare_inputs_fn=prepare_inputs,
+        command_args=command_args,
+        **kwargs
+    )
+
 
 def normalize_fod(wmfod, gmfod, csffod, mask, **kwargs):
     """
     Run the MRtrix3 mtnormalise script to normalize the fod data.
     """
-
-    # Set the config
-    config, tools = set_config()
-    # Set the path to the DWI data
-    tmp_folder = tempfile.mkdtemp()
-    os.chdir(tmp_folder)
-
-    # Copy the DWI data to the temporary folder
-    wmfod_tmp = copy2nii(wmfod.path, opj(tmp_folder, 'wmfod.nii.gz'))
-    gmfod_tmp = copy2nii(gmfod.path, opj(tmp_folder, 'gmfod.nii.gz'))
-    csffod_tmp = copy2nii(csffod.path, opj(tmp_folder, 'csffod.nii.gz'))
-    mask_tmp = copy2nii(mask.path, opj(tmp_folder, 'mask.nii.gz'))
-
-    # Run the response estimation
-    command = [
-        'mtnormalise',
-        wmfod_tmp, wmfod_tmp.replace('wmfod', 'norm_wmfod'),
-        gmfod_tmp, gmfod_tmp.replace('gmfod', 'norm_gmfod'),
-        csffod_tmp, csffod_tmp.replace('csffod', 'norm_csffod'),
-        '-mask', mask_tmp,
-        '-force'
-    ]
-
-    command = add_kwargs_to_cli(command, **kwargs)
-
-    call(command)
-
-    print('FOD normalization done')
-
-    base_entities = wmfod.get_entities()
-    base_entities = upt_dict(base_entities, suffix='fod', extension='nii.gz', desc='normalized')
-
-    res_dict = {
-        'norm_wmfod.nii.gz': upt_dict(base_entities, label='WM'),
-        'norm_gmfod.nii.gz': upt_dict(base_entities, label='GM'),
-        'norm_csffod.nii.gz': upt_dict(base_entities, label='CSF'),
+    inputs = {
+        "wmfod": wmfod,
+        "gmfod": gmfod,
+        "csffod": csffod,
+        "mask": mask
     }
 
-    # Add the tmp_folder to the keys
-    res_dict = {opj(tmp_folder, k): v for k, v in res_dict.items()}
+    command_args = [
+        inputs["wmfod"].path,
+        'norm_wmfod.nii.gz',
+        inputs["gmfod"].path,
+        'norm_gmfod.nii.gz',
+        inputs["csffod"].path,
+        'norm_csffod.nii.gz',
+        '-mask',
+        inputs["mask"].path]
 
-    return res_dict
+    output_pattern = {
+        'norm_wmfod.nii.gz': {"suffix": "fod", "extension": "nii.gz", "desc": "normalized", "label": "WM"},
+        'norm_gmfod.nii.gz': {"suffix": "fod", "extension": "nii.gz", "desc": "normalized", "label": "GM"},
+        'norm_csffod.nii.gz': {"suffix": "fod", "extension": "nii.gz", "desc": "normalized", "label": "CSF"}
+    }
+
+    return run_mrtrix_command(
+        'mtnormalise',
+        inputs,
+        output_pattern,
+        wmfod.get_entities(),
+        command_args=command_args,
+        **kwargs
+    )
+
 
 def fod_to_fixels(fod, mask=None, **kwargs):
     """
@@ -231,49 +202,71 @@ def fod_to_fixels(fod, mask=None, **kwargs):
     ----------
     fod : ActiDepFile
         The fod data to estimate the fixels from
-
+    mask : ActiDepFile (optional)
+        Brain mask to use for the estimation
     """
+    inputs = {
+        "fod": fod,
+        "mask": mask
+    }
+    afd = "afd.nii.gz"
+    peak_amp = "peaks_amp.nii.gz"
+    disp = "disp.nii.gz"
 
-    # Set the config
-    config, tools = set_config()
-
-    # Set the path to the DWI data
-    tmp_folder = tempfile.mkdtemp()
-    os.chdir(tmp_folder)
-
-    # Copy the DWI data to the temporary folder
-    fod_tmp = copy2nii(fod.path, opj(tmp_folder, 'fod.nii.gz'))
-
-    # Run the response estimation
-    command = [
-        'fod2fixel',
-        '-force',
-        fod_tmp,
-        tmp_folder+'/fixels',
+    command_args = [
+        inputs["fod"].path,
+        'fixels',
+        # '-afd', afd,
+        # '-peak', peak_amp,
+        # '-disp', disp,
         '-nii'
     ]
 
-    command = add_kwargs_to_cli(command, **kwargs)
-
-    if mask is not None:
-        mask_tmp = copy2nii(mask.path, opj(tmp_folder, 'mask.nii.gz'))
-        command += ['-mask', mask_tmp]
-    
-    call(command)
-
-    print('Fixels estimation done')
+    if mask:
+        command_args.extend(['-mask',
+                             mask.path])
 
     base_entities = fod.get_entities()
+    output_pattern = {
+        'fixels': upt_dict(base_entities, {"suffix": "fixels", 'is_dir': True,'extension': 'fixel'}),
+    }
 
-    res_dict = {'fixels/directions.nii': upt_dict(base_entities, suffix='fixels', extension='nii.gz', desc='directions'),
-                'fixels/index.nii': upt_dict(base_entities, suffix='fixels', extension='nii.gz', desc='index')
-                }
     
-    # Add the tmp_folder to the keys
-    res_dict = {opj(tmp_folder, k): v for k, v in res_dict.items()}
-    return res_dict
+    res_dict = run_mrtrix_command(
+        'fod2fixel',
+        inputs,
+        output_pattern,
+        fod.get_entities(),
+        command_args=command_args,
+        **kwargs
+    )
 
-        
+    fixel_path = str([k for k,v in res_dict.items() if os.path.basename(k) == 'fixels'][0])
+
+    fixel_file = FixelFile(fixel_path).write(fixel_path+'.fixel',compress=True)
+
+    final_dict={f'{fixel_path}.fixel': upt_dict(base_entities, suffix='fixels', extension='fixel', is_dir=False)}
+
+    # json_sidecar = {
+    #     'fixel_files': {
+    #         # 'afd.nii.gz': upt_dict(base_entities, suffix='fixels', desc='afd'),
+    #         # 'peaks_amp.nii.gz': upt_dict(base_entities, suffix='fixels', desc='peaks_amp'),
+    #         # 'disp.nii.gz': upt_dict(base_entities, suffix='fixels', desc='disp'),
+    #         'directions.nii': upt_dict(base_entities, suffix='fixels', desc='directions', extension='nii'),
+    #         'index.nii': upt_dict(base_entities, suffix='fixels', desc='index', extension='nii')
+    #     }
+    # }
+
+    # #Write the json sidecar in the fixel parent directory
+    # json_path = opj(pathlib.Path(fixel_path).parent, 'fixels.json')
+    # print('JSON PATH:', json_path)
+    # with open(json_path, 'w') as f:
+    #     json.dump(json_sidecar, f)
+
+    # res_dict[json_path] = upt_dict(res_dict[fixel_path], extension='json',is_dir=False)
+
+    return final_dict
+
 
 def get_peaks(fod, mask=None, **kwargs):
     """
@@ -283,61 +276,93 @@ def get_peaks(fod, mask=None, **kwargs):
     ----------
     fod : ActiDepFile
         The fod data to estimate the peaks from
-
+    mask : ActiDepFile (optional)
+        Brain mask to use for the estimation
     """
-
-    # Set the config
-    config, tools = set_config()
-    # Set the path to the DWI data
-    tmp_folder = tempfile.mkdtemp()
-    os.chdir(tmp_folder)
-
-    # Copy the DWI data to the temporary folder
-    fod_tmp = copy2nii(fod.path, opj(tmp_folder, 'fod.nii.gz'))
-
-    # Run the response estimation
-    command = [
-        'sh2peaks',
-        '-force',
-        fod_tmp
-    ]
-
-    command = add_kwargs_to_cli(command, **kwargs)
-
-    command += [opj(tmp_folder, 'peaks.nii.gz')]
-
-    call(command)
-
-    print('Peaks estimation done')
-
-    base_entities = fod.get_entities()
-    base_entities = upt_dict(base_entities, suffix='peaks', extension='nii.gz')
-
-    res_dict = {
-        'peaks.nii.gz': base_entities
+    inputs = {
+        "fod": fod,
+        "mask": mask
     }
 
-    # Add the tmp_folder to the keys
-    res_dict = {opj(tmp_folder, k): v for k, v in res_dict.items()}
+    command_args = [
+        inputs["fod"].path]
 
-    return res_dict
+    if mask:
+        command_args.extend(['-mask',
+                             mask.path])
+
+    command_args.append('peaks.nii.gz')
+
+    output_pattern = {
+        'peaks.nii.gz': {"suffix": "peaks", "extension": "nii.gz"}
+    }
+
+    return run_mrtrix_command(
+        'sh2peaks',
+        inputs,
+        output_pattern,
+        fod.get_entities(),
+        command_args=command_args,
+        **kwargs
+    )
 
 
-def filter_peaks(peaks,threshold=0.5):
+def get_peak_density(peaks_file):
     """
-    Filter the peaks to keep only the ones with an amplitude above 0.1
+    Calculate peak density from peaks data.
+
+    Parameters
+    ----------
+    peaks_file : ActiDepFile
+        The peaks data to estimate the peak density from
     """
-    peaks_img = sitk.ReadImage(peaks)
-    peaks_arr = sitk.GetArrayFromImage(peaks_img)
-    peaks_arr[peaks_arr < threshold] = 0
-    peaks_img = sitk.GetImageFromArray(peaks_arr)
-    peaks_img.CopyInformation(peaks_img)
-    return peaks_img
+    peaks_img = nib.load(peaks_file.path)
+    peaks_data = peaks_img.get_fdata()
+
+    # Count the number of peaks in each voxel (each peak has 3 components x,y,z)
+    density = np.sum(np.sqrt(np.sum(peaks_data.reshape(
+        *peaks_data.shape[:-1], -1, 3) ** 2, axis=-1)) > 0, axis=-1)
+
+    # Create a new nifti image with the peak density
+    density_img = nib.Nifti1Image(density, peaks_img.affine, peaks_img.header)
+
+    return density_img
+
+
+def fixel_to_peaks(fixel_dir, **kwargs):
+    """
+    Calls the MRtrix3 fixel2sh script to estimate the peaks from the fixel data.
+
+    Parameters
+    ----------
+    fixel_dir : ActiDepFile
+        The fixel data to estimate the peaks from
+    """
+    inputs = {
+        "fixel_dir": fixel_dir
+    }
+
+    command_args = [
+        inputs["fixel_dir"].path,
+        'peaks.nii.gz'
+    ]
+
+    output_pattern = {
+        'peaks.nii.gz': {"suffix": "peaks", "extension": "nii.gz"}
+    }
+
+    return run_mrtrix_command(
+        'fixel2sh',
+        inputs,
+        output_pattern,
+        fixel_dir.get_entities(),
+        command_args=command_args,
+        **kwargs
+    )
 
 
 if __name__ == "__main__":
     config, tools = set_config()
-    subject = Subject('03011')
     # dwi = subject.get_unique(suffix='dwi', desc='preproc',
     #                          pipeline='anima_preproc', extension='nii.gz')
     # bval = subject.get_unique(extension='bval')
@@ -346,8 +371,9 @@ if __name__ == "__main__":
 
     # pprint(get_tissue_responses(dwi, bval, bvec, mask, 'test'))
 
-    fod = subject.get_unique(model='fod', pipeline='msmt_csd', label='WM',suffix='dwi')
-    print(fod)
+    # fod = subject.get_unique(
+    #     model='fod', pipeline='msmt_csd', label='WM', suffix='dwi')
+    # print(fod)
 
     # peaks = subject.get_unique(suffix='peaks', label='WM', desc='preproc', pipeline='msmt_csd', extension='nii.gz')
     # print(peaks)
@@ -357,3 +383,11 @@ if __name__ == "__main__":
     # entities = upt_dict(entities, suffix='peaks', extension='nii.gz', desc='filtered')
 
     # subject.write_object(peaks_filtered, **entities)
+    # subject = Subject('03011')
+    # fixels = subject.get(extension='fixel')
+    # fixels = FixelFile(fixels[0].path)
+    # #Add a fake file to the fixels
+    # fixels.add_file('/home/ndecaux/Code/Data/actidep_bids/derivatives/msmt_csd/sub-03011/dwi/sub-03011_desc-preproc_label-WM_response.txt')
+
+    
+

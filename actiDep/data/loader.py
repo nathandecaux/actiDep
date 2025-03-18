@@ -9,7 +9,8 @@ from ..utils.tools import del_key, upt_dict, create_pipeline_description
 from .io import parse_filename, convertNRRDToNifti, copy2nii, move2nii, copy_list, copy_from_dict
 import ants
 import json
-
+from pprint import pprint
+import nibabel as nib
 
 class ActiDepFile(bids.layout.BIDSFile):
     def __init__(self, bids_file, subject=None):
@@ -73,36 +74,76 @@ class Subject:
         Basically a wrapper around the BIDSLayout.get() method that also handles custom entities.
         """
         # Get all kwargs that are known entities
+        self.layout = BIDSLayout(
+            self.db_root, derivatives=True, validate=False
+        )
         official_entities = list(self.layout.get_entities().keys())
         other_entries = ['return_type', 'target', 'scope',
                          'regex_search', 'absolute_paths', 'invalid_filters']
+    
+        # Séparer les entités connues et les entités personnalisées
+        known_entities = {k: kwargs[k] for k in kwargs.keys() 
+                         if k in official_entities+other_entries}
+        custom_entities = {k: v for k, v in kwargs.items() 
+                          if k not in known_entities.keys()}
+    
+        # Préparer les paramètres pour la requête BIDS
+        query_params = {'subject': self.sub_id, 'regex_search': True}
+        
+        # Traiter les entités "None" et les négations (!) pour les entités connues
+        for entity, value in list(known_entities.items()):
+            if value is None:
+                # Si la valeur est None, on n'ajoute pas ce critère à la requête
+                custom_entities.update({entity:known_entities.pop(entity)})
 
-        known_entities = {k: kwargs[k] for k in kwargs.keys(
-        ) if k in official_entities+other_entries}
-        # other_entries = return_type='object', target=None, scope='all',
-        #     regex_search=False, absolute_paths=None, invalid_filters
-
-        # Get all kwargs that are unknown entities
-        custom_entities = {
-            k: v for k, v in kwargs.items() if k not in known_entities.keys()}
-
-        sub_list = self.layout.get(subject=self.sub_id, **known_entities)
+            elif isinstance(value, str) and '!' in value:
+                # Si on veut exclure une valeur, on construit une regex d'exclusion
+                excluded_value = value.replace('!', '')
+                known_entities[entity] = f'^((?!{excluded_value}).)*$'
+        
+        # Ajouter les entités connues restantes à la requête
+        query_params.update(known_entities)
+        
+        # Récupérer la liste initiale de fichiers
+        sub_list = self.layout.get(**query_params)
+        
+        # Filtrer par pipeline si spécifié
         if 'pipeline' in custom_entities:
             pipeline = custom_entities.pop('pipeline')
             # Filter files that don't contains derivative/<pipeline> in their path
             sub_list = [f for f in sub_list if f.path.find(
                 f'derivatives/{pipeline}/') != -1]
-
-        # Filter the files that match the custom entities
+        
+        # Filtrer par entités personnalisées
         files = []
         for f in sub_list:
             entities = parse_filename(f.filename)
             try:
-                if all([entities[k] == v for k, v in custom_entities.items()]):
+                matched = True
+                for k, v in custom_entities.items():
+                    if v is None:
+                        # Si la valeur est None, on vérifie que la clé n'existe pas dans les entités
+                        if k in entities:
+                            matched = False
+                            break
+                    elif isinstance(v, str) and '!' in v:
+                        # Si la valeur commence par !, on vérifie que la clé n'existe pas avec une valeur spécifique
+                        if entities.get(k) == v[1:]:
+                            matched = False
+                            break
+                    else:
+                        # Comportement habituel: vérification que la clé existe avec la valeur attendue
+                        if entities.get(k) != v:
+                            matched = False
+                            break
+                
+                if matched:
                     actidep_file = ActiDepFile(f, self)
                     files.append(actidep_file)
             except KeyError:
+                # Si une clé n'existe pas et qu'on cherche une valeur spécifique (pas None)
                 continue
+        
         return files
 
     def get_unique(self, **kwargs):
@@ -116,7 +157,7 @@ class Subject:
             raise ValueError(f"Multiple files found for {kwargs}")
         return files[0]
 
-    def build_path(self, suffix, pipeline=None, scope=None, original_name=None, **kwargs):
+    def build_path(self, suffix, pipeline=None, scope=None, original_name=None, is_dir=False, **kwargs):
         """
         Construire le chemin d'un fichier dans le layout à partir d'entités et d'un pipeline donnés.
 
@@ -152,10 +193,14 @@ class Subject:
                 extension = '.nii.gz'
 
         else:
+            
+            is_dir = entities.get('is_dir') or is_dir
+            
             if 'extension' in entities:
                 extension = '.' + entities['extension'].lstrip('.')
             else:
-                extension = '.nii.gz'
+                
+                extension = '' if is_dir else '.nii.gz'
                 # Display a warning
                 print(
                     f"Warning: No extension provided for {entities}, assuming {extension}")
@@ -196,6 +241,9 @@ class Subject:
         elif isinstance(obj, dict):
             with open(path, 'w') as f:
                 json.dump(obj, f)
+            
+        elif isinstance(obj, nib.Nifti1Image):
+            nib.save(obj, path)
 
         elif isinstance(obj, str):
             copy2nii(obj, path)

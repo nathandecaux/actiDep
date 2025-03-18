@@ -9,7 +9,7 @@ from actiDep.data.loader import Subject
 from actiDep.data.io import copy2nii, move2nii, copy_list, copy_from_dict
 from actiDep.utils.registration import antsRegistration, registerT1onB0, apply_transforms, get_transform_list
 from actiDep.utils.tools import del_key, upt_dict, create_pipeline_description
-from actiDep.utils.fod import get_tissue_responses, get_msmt_csd, get_peaks,normalize_fod,fod_to_fixels
+from actiDep.utils.fod import get_tissue_responses, get_msmt_csd, get_peaks,normalize_fod,fod_to_fixels,get_peak_density
 import tempfile
 import glob
 import shutil
@@ -28,8 +28,16 @@ def process_msmt_csd(subject):
         subject = Subject(subject)
     pipeline='msmt_csd'
 
-    # pipeline_list = ['init','response','fod','normalize','fixels','peaks']
-    pipeline_list = ['fixels']
+    pipeline_list = [
+                    #  'init',
+                    #  'response',
+                    #  'fod',
+                    #  'normalize',
+                     'fixels',
+                    #  'peaks',
+                    #  'peak_density'
+                     ]
+    # pipeline_list = ['fixels']
     # pipeline_list = ['normalize']
 
     if 'init' in pipeline_list:
@@ -84,9 +92,9 @@ def process_msmt_csd(subject):
     if 'normalize' in pipeline_list:
         sleep(1)
         #4. Normalize FODs
-        wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='preproc')
-        gm_fod = subject.get_unique(label='GM', model='fod', pipeline=pipeline, desc='preproc')
-        csf_fod = subject.get_unique(label='CSF', model='fod', pipeline=pipeline, desc='preproc')
+        wm_fod = subject.get_unique(label='WM', suffix='fod', pipeline=pipeline, desc='preproc')
+        gm_fod = subject.get_unique(label='GM', suffix='fod', pipeline=pipeline, desc='preproc')
+        csf_fod = subject.get_unique(label='CSF', suffix='fod', pipeline=pipeline, desc='preproc')
         mask = subject.get_unique(suffix='mask', label='brain', datatype='dwi',space='B0')
         res_dict = normalize_fod(wm_fod, gm_fod, csf_fod, mask)
         copy_from_dict(subject, res_dict,pipeline=pipeline)
@@ -105,9 +113,17 @@ def process_msmt_csd(subject):
         #5.b Perform peak extraction
 
         wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline,desc='normalized',suffix='fod')
-        peaks_dict = get_peaks(wm_fod,threshold=0.3)
+        peaks_dict = get_peaks(wm_fod)
         copy_from_dict(subject, peaks_dict,pipeline=pipeline)
-        
+    
+    if 'peak_density' in pipeline_list:
+        sleep(1)
+        # Calculate peak density
+        peaks = subject.get_unique(suffix='peaks', label='WM', desc='normalized', pipeline='msmt_csd')
+        peak_density = get_peak_density(peaks)
+        entities = peaks.get_entities()
+        entities = upt_dict(entities, suffix='density', extension='nii.gz', pipeline='msmt_csd')
+        subject.write_object(peak_density, **entities)
         
 if __name__ == "__main__":
     config,tools = set_config()
