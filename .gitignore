@@ -1,1 +1,3 @@
 **/*.pyc
+tests/HCP_Sample/*
+*.tck

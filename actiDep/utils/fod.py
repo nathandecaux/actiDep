@@ -209,9 +209,9 @@ def fod_to_fixels(fod, mask=None, **kwargs):
         "fod": fod,
         "mask": mask
     }
-    afd = "afd.nii.gz"
-    peak_amp = "peaks_amp.nii.gz"
-    disp = "disp.nii.gz"
+    # afd = "afd.nii.gz"
+    # peak_amp = "peaks_amp.nii.gz"
+    # disp = "disp.nii.gz"
 
     command_args = [
         inputs["fod"].path,
@@ -219,7 +219,7 @@ def fod_to_fixels(fod, mask=None, **kwargs):
         # '-afd', afd,
         # '-peak', peak_amp,
         # '-disp', disp,
-        '-nii'
+        # '-nii'
     ]
 
     if mask:
@@ -324,12 +324,12 @@ def get_peak_density(peaks_file):
         *peaks_data.shape[:-1], -1, 3) ** 2, axis=-1)) > 0, axis=-1)
 
     # Create a new nifti image with the peak density
-    density_img = nib.Nifti1Image(density, peaks_img.affine, peaks_img.header)
+    density_img = nib.Nifti1Image(density.astype('uint8'), peaks_img.affine)
 
     return density_img
 
 
-def fixel_to_peaks(fixel_dir, **kwargs):
+def fixel_to_peaks(fixels, **kwargs):
     """
     Calls the MRtrix3 fixel2sh script to estimate the peaks from the fixel data.
 
@@ -338,24 +338,26 @@ def fixel_to_peaks(fixel_dir, **kwargs):
     fixel_dir : ActiDepFile
         The fixel data to estimate the peaks from
     """
+    fixels_obj = FixelFile(fixels.path)
+
     inputs = {
-        "fixel_dir": fixel_dir
+        "fixels": fixels
     }
 
     command_args = [
-        inputs["fixel_dir"].path,
+        fixels_obj.dir_path,
         'peaks.nii.gz'
     ]
 
     output_pattern = {
-        'peaks.nii.gz': {"suffix": "peaks", "extension": "nii.gz"}
+        'peaks.nii.gz': dict(suffix='peaks', extension='nii.gz',desc='fixels2peaks')
     }
 
     return run_mrtrix_command(
-        'fixel2sh',
+        'fixel2peaks',
         inputs,
         output_pattern,
-        fixel_dir.get_entities(),
+        fixels.get_entities(),
         command_args=command_args,
         **kwargs
     )
@@ -383,11 +385,9 @@ if __name__ == "__main__":
     # entities = upt_dict(entities, suffix='peaks', extension='nii.gz', desc='filtered')
 
     # subject.write_object(peaks_filtered, **entities)
-    # subject = Subject('03011')
-    # fixels = subject.get(extension='fixel')
-    # fixels = FixelFile(fixels[0].path)
+
     # #Add a fake file to the fixels
-    # fixels.add_file('/home/ndecaux/Code/Data/actidep_bids/derivatives/msmt_csd/sub-03011/dwi/sub-03011_desc-preproc_label-WM_response.txt')
+    # fixels.add_file('/home/ndecaux/Data/actidep_bids/derivatives/msmt_csd/sub-03011/dwi/sub-03011_desc-preproc_label-WM_response.txt')
 
     
 

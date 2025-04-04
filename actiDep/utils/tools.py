@@ -4,14 +4,14 @@ from os.path import join as opj
 from pathlib import Path
 import pathlib
 from os.path import join as opj
-from ..data.io import copy2nii
+from ..data.io import copy2nii, symbolic_link
 from ..set_config import set_config
 from subprocess import call
 import shutil
 import tempfile
 import time
-def run_cli_command(command_name, inputs, output_pattern, entities_template, 
-                   prepare_inputs_fn=None, command_args=None, **kwargs):
+def run_cli_command(command_name, inputs, output_pattern, entities_template={}, 
+                   prepare_inputs_fn=None, command_args=None,use_sym_link=True, **kwargs):
     """
     Fonction générique pour exécuter une commande CLI sur des fichiers d'entrée
     et retourner les résultats structurés.
@@ -58,7 +58,10 @@ def run_cli_command(command_name, inputs, output_pattern, entities_template,
             tmp_inputs[name] = file_obj
         else:
             tmp_path = opj(tmp_folder, f'{name}{file_obj.extension}')
-            tmp_inputs[name] = copy2nii(file_obj.path, tmp_path)
+            if use_sym_link:
+                tmp_inputs[name] = symbolic_link(file_obj.path, tmp_path)
+            else:
+                tmp_inputs[name] = copy2nii(file_obj.path, tmp_path)
    
     
     # Application de la fonction de préparation si nécessaire

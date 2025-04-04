@@ -1,0 +1,30 @@
+
+    body {
+        background-color: #f8f9fa;
+    }
+    
+    .card {
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+    }
+    
+    .entity-badge {
+        margin: 2px;
+        display: inline-block;
+    }
+    
+    #dynamicFilters .filter-row {
+        margin-bottom: 10px;
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 5px;
+        position: relative;
+    }
+    
+    .remove-filter {
+        position: absolute;
+        right: 5px;
+        top: 5px;
+        cursor: pointer;
+    }
+    

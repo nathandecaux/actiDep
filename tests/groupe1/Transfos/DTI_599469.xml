@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<TransformationList>
+<Transformation>
+<Type>linear</Type>
+<Inversion>0</Inversion>
+<Path>residualDir/DTI_1_linear_tr.txt</Path>
+</Transformation>
+<Transformation>
+<Type>svf</Type>
+<Inversion>0</Inversion>
+<Path>residualDir/DTI_1_nonlinear_tr.nrrd</Path>
+</Transformation>
+</TransformationList>

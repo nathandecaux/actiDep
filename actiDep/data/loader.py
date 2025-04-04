@@ -1,16 +1,16 @@
 from bids import BIDSLayout
 import bids
 from os.path import join as opj
-import os
 import SimpleITK as sitk
-import shutil
-import pathlib
-from ..utils.tools import del_key, upt_dict, create_pipeline_description
-from .io import parse_filename, convertNRRDToNifti, copy2nii, move2nii, copy_list, copy_from_dict
+from actiDep.utils.tools import create_pipeline_description
+from actiDep.data.io import copy2nii, move2nii, parse_filename
 import ants
 import json
 from pprint import pprint
 import nibabel as nib
+import ants
+import pathlib
+import os
 
 class ActiDepFile(bids.layout.BIDSFile):
     def __init__(self, bids_file, subject=None):
@@ -58,7 +58,7 @@ class ActiDepFile(bids.layout.BIDSFile):
 
 
 class Subject:
-    def __init__(self, sub_id, db_root='/home/ndecaux/Code/Data/actidep_bids'):
+    def __init__(self, sub_id, db_root='/home/ndecaux/Data/actidep_bids'):
         self.db_root = db_root
         self.sub_id = sub_id
         self.bids_id = f'sub-{sub_id}'
@@ -232,11 +232,13 @@ class Subject:
         path = self.build_path(suffix, pipeline, scope,
                                original_name, **kwargs)
         
+        pathlib.Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
+        
         if isinstance(obj, sitk.Image):
             sitk.WriteImage(obj, path)
 
         elif isinstance(obj, ants.ANTsImage):
-            obj.to_filename(path)
+            ants.image_write(obj, path)
 
         elif isinstance(obj, dict):
             with open(path, 'w') as f:
@@ -253,9 +255,52 @@ class Subject:
 
         return path
 
+    def get_entity_values(self):
+        """
+        Get all entities that exist for this subject and their possible values.
+        
+        Returns:
+            dict: A dictionary where keys are entity names and values are lists of all possible values for those entities
+        """
+        # Initialize the result dictionary
+        entity_values = {}
+        
+        # Get all files for this subject
+        files = self.layout.get(subject=self.sub_id)
+
+        #exclude .dcm files
+        files = [f for f in files if not f.path.endswith('.dcm')]
+        
+        # Process each file
+        for file in files:
+            # Get file entities
+            entities = parse_filename(file.filename)
+            
+            # Add standard BIDS entities
+            standard_entities = file.get_entities()
+            entities.update(standard_entities)
+            
+            # Process each entity
+            for entity, value in entities.items():
+                if entity == 'subject':  # Skip subject as it's constant for this Subject instance
+                    continue
+                    
+                # Initialize the list for this entity if it doesn't exist
+                if entity not in entity_values:
+                    entity_values[entity] = []
+                    
+                # Add the value if it's not already in the list
+                if value not in entity_values[entity]:
+                    entity_values[entity].append(value)
+        
+        # Sort values for better readability
+        for entity in entity_values:
+            entity_values[entity].sort()
+            
+        return entity_values
 
 class Actidep:
-    def __init__(self, db_root='/home/ndecaux/Code/Data/actidep_bids'):
+    def __init__(self, db_root='/home/ndecaux/Data/actidep_bids'):
         __abstract__ = True
         self.db_root = db_root
         self.layout = BIDSLayout(self.db_root, derivatives=True)
@@ -278,3 +323,4 @@ if __name__ == "__main__":
     example = subject.get(suffix='dwi', extension='bvec', scope='raw')
 
     print(example)
+    pprint(subject.get_entity_values())

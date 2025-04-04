@@ -178,7 +178,6 @@ class FixelFile:
         files_str = "\n  ".join([f"{name}: {os.path.basename(path)}" for name, path in self.files.items()])
         return f"FixelFile at {self.dir_path}:\n  {files_str}"
 
-    
 
 
 def parse_filename(filename):
@@ -202,9 +201,6 @@ def convertNRRDToNifti(nrrd_path, nifti_path):
     # Écrire l'image NIfTI
     sitk.WriteImage(itk_image, nifti_path)
 
-
-        
-
 def copy2nii(source, dest):
     """Copie un fichier, en convertissant en nifti si nécessaire."""
     print(f"Copying {source} to {dest}")
@@ -217,6 +213,13 @@ def copy2nii(source, dest):
             shutil.copytree(source, dest, dirs_exist_ok=True)
         else:
             shutil.copy2(source, dest)
+    return dest
+
+def symbolic_link(source, dest):
+    """Crée un lien symbolique."""
+    print(f"Creating symbolic link from {source} to {dest}")
+    pathlib.Path(os.path.dirname(dest)).mkdir(parents=True, exist_ok=True)
+    os.symlink(source, dest)
     return dest
 
 
@@ -258,7 +261,7 @@ def copy_list(dest, file_list):
         else:
             shutil.copy(src_path, dest)
 
-def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False):
+def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False, **kwargs):
     """
     Copy files from a dictionary to the BIDS dataset.
     eg file_dict : 
@@ -270,10 +273,14 @@ def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False):
                                       'suffix': 'propseg'}
     }
     """
+    mapping={}
     for src_file, entities in file_dict.items():
+        entities.update(kwargs)
         dest_file = subject.build_path(
             original_name=os.path.basename(src_file), **entities, pipeline=pipeline)
         if not dry_run:
             copy2nii(src_file, dest_file)
         else:
             print(f"Copying {src_file} to {dest_file}")
+        mapping[src_file] = dest_file
+    return mapping
