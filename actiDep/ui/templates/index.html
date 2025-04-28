@@ -1,5 +1,4 @@
-
-    <!DOCTYPE html>
+<!DOCTYPE html>
     <html lang="fr">
     <head>
         <meta charset="UTF-8">
@@ -57,6 +56,15 @@
                 </div>
                 
                 <div class="col-md-9">
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="freeSearchInput" placeholder="Recherche libre (nom de fichier, chemin, etc.)">
+                                <button class="btn btn-outline-secondary" type="button" id="freeSearchBtn">Rechercher</button>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div class="card">
                         <div class="card-header">Résultats</div>
                         <div class="card-body">
@@ -86,4 +94,3 @@
         <script src="{{ url_for('static', filename='script.js') }}"></script>
     </body>
     </html>
-    

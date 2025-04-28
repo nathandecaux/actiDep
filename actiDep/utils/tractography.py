@@ -16,8 +16,12 @@ import glob
 import shutil
 import ants
 import dipy
+from dipy.io.stateful_tractogram import Space, StatefulTractogram,Origin
+from dipy.io.streamline import save_tractogram, load_tractogram
 from time import process_time
 import vtk
+from dipy.tracking.streamline import transform_streamlines
+from scipy.io import loadmat
 
 
 def rotation(in_file, out_file, angle=180, x=0, y=0, z=1):
@@ -81,6 +85,71 @@ def generate_ifod2_tracto(odf, seeds, **kwargs):
     }
     return run_mrtrix_command('tckgen', inputs, output_patterns, entities_template=odf.get_entities(), command_args=command_args, **kwargs)
 
+def load_matrix_in_any_format(filepath):
+    _, ext = os.path.splitext(filepath)
+    if ext == '.txt':
+        data = np.loadtxt(filepath)
+    elif ext == '.npy':
+        data = np.load(filepath)
+    elif ext == '.mat':
+        # .mat are actually dictionnary. This function support .mat from
+        # antsRegistration that encode a 4x4 transformation matrix.
+        transfo_dict = loadmat(filepath)
+        print(transfo_dict)
+        lps2ras = np.diag([-1, -1, 1])
+
+        rot = transfo_dict['AffineTransform_float_3_3'][0:9].reshape((3, 3))
+        trans = transfo_dict['AffineTransform_float_3_3'][9:12]
+        offset = transfo_dict['fixed']
+        r_trans = (np.dot(rot, offset) - offset - trans).T * [1, 1, -1]
+
+        data = np.eye(4)
+        data[0:3, 3] = r_trans
+        data[:3, :3] = np.dot(np.dot(lps2ras, rot), lps2ras)
+    else:
+        raise ValueError('Extension {} is not supported'.format(ext))
+
+    return data
+
+def apply_affine(tracto, affine_mat, reference, target):
+    """
+    Apply the given affine matrix to the tractography file.
+
+    Parameters
+    ----------
+    tracto : ActiDepFile
+        ActiDepFile object containing the tractography file to transform.
+    affine_mat : str
+        Path to the affine matrix file.
+    reference : str
+        Path to the reference image file.
+    target : str
+        Path to the target image file.
+    Returns
+    -------
+    str
+        Path to the transformed tractography file.
+    """
+
+    #Create a temporary directory
+    temp_dir = tempfile.mkdtemp()
+
+    # Load the affine matrix
+    affine_matrix = load_matrix_in_any_format(affine_mat)
+    affine_matrix = np.linalg.inv(affine_matrix)
+    # Load the tractogram file
+    tractogram = load_tractogram(tracto.path, reference)
+    tractogram.to_space(Space.RASMM)
+    # Apply the affine transformation
+
+    tractogram.streamlines = transform_streamlines(tractogram.streamlines, affine_matrix)
+    
+    tractogram= StatefulTractogram(tractogram.streamlines, target, Space.RASMM)
+
+    # Save the transformed tractogram
+    output_file = f'{temp_dir}/transformed_tractogram.trk'
+    save_tractogram(tractogram, output_file, bbox_valid_check=False)
+    return output_file
 
 def generate_trekker_tracto(odf, seeds, n_seeds=1000, **kwargs):
 

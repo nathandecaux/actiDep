@@ -1,5 +1,4 @@
-
-    body {
+body {
         background-color: #f8f9fa;
     }
     
@@ -11,6 +10,7 @@
     .entity-badge {
         margin: 2px;
         display: inline-block;
+        font-size: 0.8rem;
     }
     
     #dynamicFilters .filter-row {
@@ -26,5 +26,22 @@
         right: 5px;
         top: 5px;
         cursor: pointer;
+        margin-right: 5px;
+        margin-bottom: 5px;
+        display: inline-block;
     }
-    
+
+/* Styles pour les noms de fichiers dans la table des résultats */
+#resultsTable td:first-child {
+    word-wrap: break-word;
+    max-width: 250px;
+    white-space: normal;
+    line-height: 1.3;
+}
+
+/* Styles pour les lignes de filtres */
+.filter-row {
+    position: relative;
+    margin-bottom: 15px;
+    padding-right: 20px;
+}

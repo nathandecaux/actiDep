@@ -112,9 +112,9 @@ def process_fixel_density(subject, pipeline, **kwargs):
 def process_ifod2_tracto(subject, pipeline, **kwargs):
     """Run iFOD2 tractography"""
     odf = subject.get_unique(suffix='fod', label='WM', desc='normalized', pipeline=pipeline)
-    seeds = subject.get_unique(suffix='mask', label='WM', space='B0')
+    seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
     tracto = generate_ifod2_tracto(odf, seeds, **kwargs)
-    copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='ifod2')
+    copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='ifod2',label='brain')
 
 def process_trekker_tracto(subject, pipeline, **kwargs):
     """Run Trekker tractography"""
@@ -149,8 +149,8 @@ def process_msmt_csd(subject):
         # 'peak_density',
         # 'fixels2peaks',
         # "fixel_density",
-        # 'ifod2_tracto',
-        'trekker_tracto'
+        'ifod2_tracto',
+        # 'trekker_tracto'
     ]
     
     # Get DWI data that will be used across multiple steps
@@ -167,7 +167,7 @@ def process_msmt_csd(subject):
         'peak_density': lambda: process_peak_density(subject, pipeline),
         'fixels2peaks': lambda: process_fixels2peaks(subject, pipeline),
         'fixel_density': lambda: process_fixel_density(subject, pipeline),
-        'ifod2_tracto': lambda: process_ifod2_tracto(subject, pipeline,n_streams=CLIArg('-select', 625000)),
+        'ifod2_tracto': lambda: process_ifod2_tracto(subject, pipeline,n_streams=CLIArg('-select', 1000000)),
         'trekker_tracto': lambda: process_trekker_tracto(subject, pipeline,n_seeds=500000)
     }
     

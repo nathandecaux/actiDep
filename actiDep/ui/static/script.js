@@ -1,5 +1,4 @@
-
-    // Variables globales
+// Variables globales
     let entities = {};
     let entityValues = {}; // Stockage des valeurs d'entités par sujet
     let currentSubject = '';
@@ -45,7 +44,80 @@
         document.getElementById('addFilterBtn').addEventListener('click', addFilter);
         document.getElementById('subject').addEventListener('change', handleSubjectChange);
         document.getElementById('pipeline').addEventListener('change', handlePipelineChange);
+        
+        // Nouveaux gestionnaires d'événements pour la recherche libre
+        document.getElementById('freeSearchBtn').addEventListener('click', handleFreeSearch);
+        document.getElementById('freeSearchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleFreeSearch();
+                e.preventDefault();
+            }
+        });
     });
+    
+    // Nouvelle fonction pour gérer la recherche libre
+    function handleFreeSearch() {
+        // On récupère le texte à rechercher
+        const searchText = document.getElementById('freeSearchInput').value.trim();
+        
+        // Construire les paramètres de recherche
+        const params = new URLSearchParams();
+        
+        // Ajouter le sujet et le pipeline seulement s'ils ne sont pas vides
+        const subject = document.getElementById('subject').value;
+        const pipeline = document.getElementById('pipeline').value;
+        
+        if (subject) {
+            params.append('subject', subject);
+        }
+        
+        if (pipeline) {
+            params.append('pipeline', pipeline);
+        }
+        
+        // Ajouter les filtres dynamiques
+        const filterRows = document.querySelectorAll('.filter-row');
+        filterRows.forEach(row => {
+            const entitySelect = row.querySelector('.entity-select');
+            const valueSelect = row.querySelector('.value-select');
+            
+            if (entitySelect.value && valueSelect.value) {
+                params.append(entitySelect.value, valueSelect.value);
+            }
+        });
+        
+        // Ajouter le texte de recherche libre
+        if (searchText) {
+            params.append('search_text', searchText);
+        }
+        
+        // Ajouter le format de sortie
+        const format = document.getElementById('outputFormat').value;
+        params.append('format', format);
+        
+        // Afficher un indicateur de chargement
+        const resultsTable = document.getElementById('resultsTable');
+        const resultsCount = document.getElementById('resultsCount');
+        resultsCount.textContent = "Recherche en cours...";
+        resultsTable.innerHTML = '<tr><td colspan="3" class="text-center">Chargement...</td></tr>';
+        
+        // Si format est CSV, télécharger directement
+        if (format === 'csv') {
+            window.location.href = `/api/search?${params.toString()}`;
+            return;
+        }
+        
+        // Faire la requête avec les filtres et la recherche libre
+        fetch(`/api/search?${params.toString()}`)
+            .then(response => response.json())
+            .then(data => {
+                displayResults(data);
+            })
+            .catch(error => {
+                resultsCount.textContent = "Erreur lors de la recherche";
+                resultsTable.innerHTML = `<tr><td colspan="3" class="text-danger">Erreur: ${error.message}</td></tr>`;
+            });
+    }
     
     function handleSubjectChange(event) {
         currentSubject = event.target.value;
@@ -228,9 +300,20 @@
     function handleSearch(e) {
         e.preventDefault();
         
-        // Construire l'URL de recherche
-        const form = document.getElementById('searchForm');
-        const formData = new FormData(form);
+        // Construire les paramètres de recherche
+        const params = new URLSearchParams();
+        
+        // Ajouter le sujet et le pipeline seulement s'ils ne sont pas vides
+        const subject = document.getElementById('subject').value;
+        const pipeline = document.getElementById('pipeline').value;
+        
+        if (subject) {
+            params.append('subject', subject);
+        }
+        
+        if (pipeline) {
+            params.append('pipeline', pipeline);
+        }
         
         // Ajouter les filtres dynamiques
         const filterRows = document.querySelectorAll('.filter-row');
@@ -239,12 +322,19 @@
             const valueSelect = row.querySelector('.value-select');
             
             if (entitySelect.value && valueSelect.value) {
-                formData.append(entitySelect.value, valueSelect.value);
+                params.append(entitySelect.value, valueSelect.value);
             }
         });
         
-        const params = new URLSearchParams(formData);
-        const format = formData.get('format');
+        // Ajouter le texte de recherche libre s'il existe
+        const searchText = document.getElementById('freeSearchInput').value.trim();
+        if (searchText) {
+            params.append('search_text', searchText);
+        }
+        
+        // Ajouter le format de sortie
+        const format = document.getElementById('outputFormat').value;
+        params.append('format', format);
         
         // Si format est CSV, télécharger directement
         if (format === 'csv') {
@@ -289,8 +379,10 @@
         results.forEach(file => {
             const row = document.createElement('tr');
             
-            // Colonne fichier
+            // Colonne fichier avec style pour permettre le retour à la ligne
             const fileCell = document.createElement('td');
+            fileCell.style.wordWrap = 'break-word';
+            fileCell.style.maxWidth = '250px';
             fileCell.textContent = file.filename;
             row.appendChild(fileCell);
             
@@ -312,17 +404,76 @@
             // Bouton pour visualiser le fichier
             const viewBtn = document.createElement('button');
             viewBtn.className = 'btn btn-sm btn-outline-primary me-2';
-            viewBtn.textContent = 'Voir';
+            viewBtn.textContent = 'Ouvrir';
             viewBtn.addEventListener('click', () => {
                 // Extraire le chemin relatif à partir du chemin complet
                 const relativePath = file.path.split('/actidep_bids/')[1];
                 window.open(`/api/view/${relativePath}`, '_blank');
             });
             actionsCell.appendChild(viewBtn);
+
+            // Bouton pour ouvrir le dossier du fichier
+            const folderBtn = document.createElement('button');
+            folderBtn.className = 'btn btn-sm btn-outline-secondary me-2';
+            folderBtn.textContent = '📁';
+            folderBtn.addEventListener('click', () => {
+                // Extraire le chemin relatif à partir du chemin complet
+                const relativePath = file.path.split('/actidep_bids/')[1];
+                window.open(`/api/folder/${relativePath}`, '_blank');
+            });
+            actionsCell.appendChild(folderBtn);
+            
+            // Nouveau bouton pour copier le chemin complet
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'btn btn-sm btn-outline-info';
+            copyBtn.textContent = '📋';
+            copyBtn.title = 'Copier le chemin complet';
+            copyBtn.addEventListener('click', () => {
+                copyToClipboard(file.path);
+                // Ajouter un retour visuel temporaire
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✓';
+                copyBtn.classList.add('btn-success');
+                copyBtn.classList.remove('btn-outline-info');
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.classList.remove('btn-success');
+                    copyBtn.classList.add('btn-outline-info');
+                }, 1000);
+            });
+            actionsCell.appendChild(copyBtn);
             
             row.appendChild(actionsCell);
             
             resultsTable.appendChild(row);
         });
     }
-    
+
+    // Fonction utilitaire pour copier du texte dans le presse-papier
+    function copyToClipboard(text) {
+        // Créer un élément temporaire
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        
+        // Le rendre invisible
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+            // Copier le texte
+            const successful = document.execCommand('copy');
+            if (!successful) {
+                console.error('Impossible de copier le texte');
+            }
+        } catch (err) {
+            console.error('Erreur lors de la copie:', err);
+        }
+        
+        // Nettoyer
+        document.body.removeChild(textArea);
+    }

@@ -8,7 +8,7 @@ from actiDep.set_config import set_config
 from actiDep.data.loader import Subject
 from actiDep.data.io import copy2nii, move2nii, copy_list, copy_from_dict
 from actiDep.utils.tools import del_key, upt_dict, create_pipeline_description, CLIArg
-from actiDep.utils.recobundle import register_template_to_subject, call_recobundle
+from actiDep.utils.recobundle import register_template_to_subject, call_recobundle,register_anat_subject_to_template
 from actiDep.utils.registration import apply_transforms
 import tempfile
 import glob
@@ -26,13 +26,48 @@ def init_pipeline(subject, pipeline, **kwargs):
     return True
 
 def process_whole_brain_registration(subject, pipeline, template_path, atlas_name='HCP105',**kwargs):
-    tracto = subject.get_unique(suffix='tracto', pipeline='msmt_csd', label='WM',desc='normalized',extension='tck',algo=None)
+    tracto = subject.get_unique(suffix='tracto', pipeline=pipeline, space=atlas_name)
     print(tracto)
     whole_brain_tract = register_template_to_subject(tracto, template_path,atlas_name=atlas_name,**kwargs)
     copy_from_dict(subject, whole_brain_tract, pipeline='recobundle_segmentation')
     return True
 
-def segment_bundle_in_atlas_space(subject, pipeline, bundle, **kwargs):
+def process_anat_registration(subject, pipeline, template_path, atlas_name='HCP105',**kwargs):
+    """
+    Register the anatomical image to the template space.
+
+    Parameters
+    ----------
+    subject : Subject
+        Subject object to process
+    pipeline : str
+        Pipeline name
+    template_path : str
+        Path to the template image
+    atlas_name : str, optional
+        Name of the atlas, by default 'HCP105'
+    kwargs : dict
+        Additional arguments for registration
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+    """
+    # Get the anatomical image from the subject
+    # anat = subject.get_unique(suffix='T1w', pipeline='msmt_csd', extension='nii.gz',space='B0')
+    anat = subject.get_unique(metric='FA', pipeline='anima_preproc', extension='nii.gz')
+    tracto = subject.get_unique(suffix='tracto', pipeline='msmt_csd', label='WM',desc='normalized',algo='ifod2')
+    print(tracto)
+    # Register the anatomical image to the template space
+    res_dict = register_anat_subject_to_template(anat, template_path,tracto ,atlas_name=atlas_name, **kwargs)
+
+    # Copy the registered anatomical image to the subject's pipeline directory
+    copy_from_dict(subject, res_dict, pipeline=pipeline)
+    
+    return True
+
+def segment_bundle_in_atlas_space(subject, pipeline, bundle,atlas_name='HCP105Group1Clustered', **kwargs):
     """
     Segment a bundle from a whole brain tractography
 
@@ -46,20 +81,20 @@ def segment_bundle_in_atlas_space(subject, pipeline, bundle, **kwargs):
         Name of the bundle to segment
     """
     # Load the whole brain tractography
-    whole_brain_tract = subject.get_unique(suffix='tracto', pipeline=pipeline, label='WM', extension='trk',atlas='HCP105Group1Clustered',desc='normalized')
+    whole_brain_tract = subject.get_unique(suffix='tracto', pipeline=pipeline, label='WM', space=atlas_name)
 
     # Load the bundle template
     # template_path = f"/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/695768/tracts/{bundle}.trk"
-    template_path = f"/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/average_{bundle}.trk"
+    template_path = f"/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/summed_{bundle}.trk"
 
     # Register the bundle template to the subject
-    bundle_tract = call_recobundle(whole_brain_tract, template_path,atlas_name='HCP105Group1Clustered',bundle_name=bundle,**kwargs)
+    bundle_tract = call_recobundle(whole_brain_tract, template_path,atlas_name=atlas_name,bundle_name=bundle,**kwargs)
 
     # Save the segmented bundle
-    copy_from_dict(subject, bundle_tract, pipeline=pipeline, label=bundle)
+    copy_from_dict(subject, bundle_tract, pipeline=pipeline, label=bundle, desc='noslr')
     return True
 
-def segment_subject_recobundle(subject,pipeline='mcm_zeppelin_3_comparts'):
+def segment_subject_recobundle(subject,pipeline='recobundle_segmentation'):
     """
     Process the MSMT-CSD pipeline on the given subject.
 
@@ -74,15 +109,18 @@ def segment_subject_recobundle(subject,pipeline='mcm_zeppelin_3_comparts'):
 
     # Define processing steps
     pipeline_list = [
-        'init',
-        'whole_brain_registration',
-        'segment_bundle_in_atlas_space'
+        # 'init',
+        'process_anat_registration',
+        # 'whole_brain_registration',
+        # 'segment_bundle_in_atlas_space'
     ]
 
     # Process each requested pipeline step
     step_mapping = {
         'init': lambda: init_pipeline(subject, pipeline),
-        'whole_brain_registration': lambda: process_whole_brain_registration(subject, pipeline, sample_streamlines=CLIArg('nb_pts',100),transform_type=CLIArg('--x0','rigid'))
+        'whole_brain_registration': lambda: process_whole_brain_registration(subject, pipeline, sample_streamlines=CLIArg('nb_pts',15),template_path='/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/clusters/whole_brain.trk', atlas_name='HCP105Group1Clustered'),
+        'process_anat_registration': lambda: process_anat_registration(subject, pipeline, template_path='/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/average_anat.nii.gz', atlas_name='HCP105Group1Clustered'),
+
     }
 
     for step in pipeline_list:
@@ -96,10 +134,14 @@ if __name__ == "__main__":
     # subject = Subject('100206',db_root='/home/ndecaux/Data/HCP/')
     subject = Subject('03011')
 
-    process_whole_brain_registration(subject, pipeline='recobundle_segmentation', template_path='/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/clusters/whole_brain.trk', atlas_name='HCP105Group1')
+    # segment_subject_recobundle(subject, pipeline='recobundle_segmentation')
 
-    # for i in range(1, 8):
-    #     segment_bundle_in_atlas_space(subject, pipeline='recobundle_segmentation', bundle=f'CC_{i}')
+    # process_whole_brain_registration(subject, pipeline='recobundle_segmentation', template_path='/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/clusters/whole_brain.trk', atlas_name='HCP105Group1')
+    models_dir='/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/'
+    bundle_list= [x.replace('summed_','').split('.')[0] for x in os.listdir(models_dir) if x.endswith('.trk')]
+    for bundle in bundle_list:
+        print('Processing bundle:',bundle)
+        segment_bundle_in_atlas_space(subject, pipeline='recobundle_segmentation', bundle=bundle, no_slr= CLIArg('--no_slr', ''), atlas_name='HCP105Group1Clustered')
     # segment_subject_recobundle(subject, pipeline='recobundle_segmentation')
     # bundles = os.listdir('/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/695768/tracts/')
     # for bundle in bundles:

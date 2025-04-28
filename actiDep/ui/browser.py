@@ -11,6 +11,8 @@ import logging
 import pathlib
 import base64
 import subprocess
+import random
+import re  # Pour les recherches textuelles
 
 # Configuration du logger
 logging.basicConfig(level=logging.INFO, 
@@ -93,21 +95,23 @@ def get_entities():
             if entity not in entity_values:
                 entity_values[entity] = []
                 
-        return jsonify({k: [] for k in entity_values.keys()})
+        return jsonify(entity_values)
     else:
         # Sinon, utiliser la méthode précédente
         layout = init_layout()
-        entities = layout.get_entities()
+        
+        # Convertir les entités en dictionnaire avec des types Python natifs
+        entities_dict = {}
+        for entity_name in layout.get_entities():
+            entities_dict[entity_name] = []
         
         # Ajouter les entités personnalisées
         custom_entities = ['pipeline', 'scope', 'model', 'desc', 'compartment', 'label']
-        
-        all_entities = {**entities}
         for entity in custom_entities:
-            if entity not in all_entities:
-                all_entities[entity] = []
+            if entity not in entities_dict:
+                entities_dict[entity] = []
         
-        return jsonify(all_entities)
+        return jsonify(entities_dict)
 
 @app.route('/api/entity_values')
 def get_entity_values():
@@ -185,15 +189,21 @@ def search_files():
     
     # Récupérer tous les paramètres de requête
     query_params = request.args.to_dict()
-    subject_id = query_params.get('subject')
+    
+    # Nettoyer les paramètres : supprimer les paramètres vides
+    cleaned_params = {k: v for k, v in query_params.items() if v and v.strip() != ''}
+    
+    subject_id = cleaned_params.get('subject')
+    search_text = cleaned_params.get('search_text', '')
     
     # Séparer les entités connues des entités personnalisées
     known_entities = layout.get_entities().keys()
-    standard_params = {k: v for k, v in query_params.items() if k in known_entities}
-    custom_params = {k: v for k, v in query_params.items() if k not in known_entities and k not in ['format']}
+    standard_params = {k: v for k, v in cleaned_params.items() if k in known_entities}
+    custom_params = {k: v for k, v in cleaned_params.items() 
+                    if k not in known_entities and k not in ['format', 'search_text']}
     
     # Format de sortie (json par défaut)
-    output_format = query_params.get('format', 'json')
+    output_format = cleaned_params.get('format', 'json')
     
     # Si un sujet est spécifié, utiliser directement la méthode get du sujet
     if subject_id:
@@ -201,7 +211,8 @@ def search_files():
         
         # Fusionner les paramètres pour la recherche
         search_params = {**standard_params, **custom_params}
-        del search_params['subject']  # On le retire car déjà inclus dans l'objet Subject
+        if 'subject' in search_params:
+            del search_params['subject']  # On le retire car déjà inclus dans l'objet Subject
         
         # Utiliser la méthode get améliorée du sujet
         results = subject.get(**search_params)
@@ -239,6 +250,71 @@ def search_files():
             results = filtered_results
         else:
             results = [ActiDepFile(file) for file in results]
+    
+    # Appliquer le filtre de recherche textuelle si spécifié
+    if search_text:
+        # Diviser en termes de recherche distincts (séparés par des espaces)
+        search_terms = search_text.lower().split()
+        filtered_results = []
+        
+        for file in results:
+            # Un fichier est inclus s'il correspond à TOUS les termes de recherche
+            match_all_terms = True
+            
+            for term in search_terms:
+                # Vérifier si le terme contient un astérisque
+                if '*' in term:
+                    # Si oui, c'est un filtre sur le nom du fichier uniquement
+                    # Convertir le terme style bash en regex
+                    # Si le terme commence par *, il doit matcher n'importe quoi au début
+                    # Si le terme finit par *, il doit matcher n'importe quoi à la fin
+                    # Si * est au milieu, il doit matcher n'importe quoi à cet endroit
+                    
+                    # D'abord échapper tous les caractères spéciaux de regex sauf *
+                    pattern = re.escape(term).replace('\\*', '.*')
+                    
+                    # S'assurer que l'expression commence au début et finit à la fin du nom de fichier
+                    if not term.startswith('*'):
+                        pattern = '^' + pattern
+                    if not term.endswith('*'):
+                        pattern = pattern + '$'
+                        
+                    regex_pattern = re.compile(pattern)
+                    
+                    # Vérifier uniquement le nom du fichier (pas le chemin complet)
+                    filename_match = regex_pattern.search(file.filename.lower()) is not None
+                    
+                    if not filename_match:
+                        match_all_terms = False
+                        break
+                else:
+                    # Si pas d'astérisque, recherche standard sur le chemin et les entités
+                    path_match = term in file.path.lower()
+                    
+                    # Vérifier si ce terme correspond à une entité
+                    entity_match = False
+                    entities = file.get_full_entities()
+                    for key, value in entities.items():
+                        if value and isinstance(value, str) and term in value.lower():
+                            entity_match = True
+                            break
+                    
+                    # Si ni le chemin ni aucune entité ne correspond à ce terme, le fichier ne correspond pas
+                    if not (path_match or entity_match):
+                        match_all_terms = False
+                        break
+            
+            if match_all_terms:
+                filtered_results.append(file)
+        
+        results = filtered_results
+    
+    # Filtrer les fichiers .dcm (DICOM)
+    filtered_results = []
+    for file in results:
+        if not file.path.lower().endswith('.dcm'):
+            filtered_results.append(file)
+    results = filtered_results
     
     # Formater les résultats selon le format demandé
     if output_format == 'csv':
@@ -298,27 +374,52 @@ def view_file(file_path):
         'modified': os.path.getmtime(full_path),
     }
     
-    # Pour les images NIFTI, on pourrait ajouter un aperçu
-
-    if full_path.endswith('.nii.gz') :
-        # Launch ITK-SNAP in detached mode
-        subprocess.Popen(['itksnap', '-g', full_path], 
-                start_new_session=True,
-                stdout=subprocess.DEVNULL, 
-                stderr=subprocess.DEVNULL)
-        
-        # Return file info to the client
-        return jsonify({**file_info, 'message': 'ITK-SNAP launched for this file'})
-
-    # Pour les fichiers texte, on pourrait afficher le contenu
+    # Ouvrir le fichier avec la commande 'xdg-open'
+    subprocess.Popen(['xdg-open', full_path], 
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL, 
+                    stderr=subprocess.DEVNULL)
     
-    # return jsonify(file_info)
+    # # Pour les images NIFTI, on utilise aussi ITK-SNAP
+    # if full_path.endswith('.nii.gz'):
+    #     # Launch ITK-SNAP in detached mode
+    #     subprocess.Popen(['itksnap', '-g', full_path], 
+    #             start_new_session=True,
+    #             stdout=subprocess.DEVNULL, 
+    #             stderr=subprocess.DEVNULL)
+        
+    #     # Return file info to the client
+    #     return jsonify({**file_info, 'message': 'File opened and ITK-SNAP launched'})
+
+    return jsonify({**file_info, 'message': 'File opened'})
+
+@app.route('/api/folder/<path:file_path>')
+def view_folder(file_path):
+    """Ouvre le dossier contenant un fichier"""
+    full_path = os.path.join(db_root, file_path)
+    
+    # Vérifier que le fichier existe
+    if not os.path.exists(full_path):
+        return jsonify({'error': 'File not found'}), 404
+    
+    # Obtenir le dossier parent
+    folder_path = os.path.dirname(full_path)
+    
+    # Ouvrir le dossier avec la commande 'xdg-open'
+    subprocess.Popen(['xdg-open', folder_path], 
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL, 
+                    stderr=subprocess.DEVNULL)
+    
+    return jsonify({'message': 'Folder opened', 'folder': folder_path})
 
 
-def run_browser(host='localhost', port=5000, debug=True):
+def run_browser(host='localhost', port=None, debug=True):
     """Démarre le serveur web"""
   
     # Lancer le serveur Flask
+    if port == None:
+        port = 5900#random.randint(5000, 6000)
     app.run(host=host, port=port, debug=debug)
 
 if __name__ == '__main__':

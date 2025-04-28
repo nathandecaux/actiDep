@@ -201,6 +201,104 @@ def run_mrtrix_command(command_name, inputs, output_pattern, entities_template,
         **kwargs
     )
 
+def run_multiple_commands(command_list, inputs, output_pattern, entities_template,
+                        prepare_inputs_fn=None, **kwargs):
+    """
+    Fonction pour exécuter plusieurs commandes sur les fichiers d'entrée.
+    Chaque commande est une liste contenant le nom de la commande et ses arguments.
+    
+    Parameters
+    ----------
+    command_list : list of lists
+        Liste des commandes à exécuter, où chaque commande est une liste [command_name, *args]
+    inputs : dict
+        Dictionnaire associant un nom à chaque fichier d'entrée
+    output_pattern : dict
+        Dictionnaire associant les noms de fichiers de sortie à leurs entités
+    entities_template : dict ou ActiDepFile
+        Entités de base à utiliser pour construire les entités de sortie
+    prepare_inputs_fn : callable, optional
+        Fonction pour préparer les entrées avant l'exécution
+    **kwargs :
+        Arguments additionnels à passer à toutes les commandes
+    Returns
+    -------
+    dict
+        Dictionnaire associant les chemins complets des fichiers de sortie à leurs entités
+    """
+    # Configuration et création du dossier temporaire
+    config, tools = set_config()
+    tmp_folder = tempfile.mkdtemp()
+    os.chdir(tmp_folder)
+    
+    # Copier les fichiers d'entrée
+    tmp_inputs = {}
+    for name, file_obj in inputs.items():
+        if file_obj is None:
+            tmp_inputs[name] = None
+            continue
+            
+        if isinstance(file_obj, str):
+            # Si c'est déjà un chemin de fichier
+            tmp_inputs[name] = file_obj
+        else:
+            tmp_path = opj(tmp_folder, f'{name}{file_obj.extension}')
+            tmp_inputs[name] = copy2nii(file_obj.path, tmp_path)
+    
+    # Appliquer la fonction de préparation si nécessaire
+    if prepare_inputs_fn:
+        prepare_inputs_fn(tmp_inputs)
+    
+    # Exécuter chaque commande
+    for cmd in command_list:
+        if not cmd:  # Skip empty commands
+            continue
+            
+        command_name = cmd[0]
+        command_args = cmd[1:] if len(cmd) > 1 else []
+        
+        # Construction de la commande
+        command = [command_name]
+        
+        # Remplacer les références symboliques par les chemins temporaires
+        processed_args = []
+        for arg in command_args:
+            if isinstance(arg, str) and arg.startswith('$'):
+                # Extraire le nom de l'entrée (sans le $)
+                input_name = arg[1:]
+                if input_name in tmp_inputs and tmp_inputs[input_name] is not None:
+                    processed_args.append(tmp_inputs[input_name])
+                else:
+                    # Si l'entrée n'existe pas, on conserve l'argument tel quel
+                    processed_args.append(arg)
+            else:
+                processed_args.append(arg)
+        
+        command.extend(processed_args)
+        
+        # Ajout des kwargs à la commande
+        command = add_kwargs_to_cli(command, **kwargs)
+        print(f"Running command: {' '.join(str(c) for c in command)}")
+        
+        # Exécution de la commande
+        call(command)
+        time.sleep(1)
+        
+        print(f"{command_name} done")
+    
+    # Préparer les entités de base pour les sorties
+    if isinstance(entities_template, dict):
+        base_entities = entities_template
+    else:
+        # Si c'est un ActiDepFile, on récupère ses entités
+        base_entities = entities_template.get_entities()
+    
+    # Construction du dictionnaire de résultats
+    res_dict = {opj(tmp_folder, output_file): upt_dict(base_entities.copy(), **entity_updates)
+                for output_file, entity_updates in output_pattern.items()}
+    
+    return res_dict
+
         
 def del_key(dct, key):
     d = dct.copy()

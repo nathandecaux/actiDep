@@ -9,6 +9,8 @@ from subprocess import call
 from actiDep.set_config import set_config
 from actiDep.data.loader import Subject, move2nii, parse_filename, ActiDepFile, copy2nii
 from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli, run_cli_command, run_mrtrix_command
+from actiDep.utils.registration import ants_registration
+from actiDep.utils.tractography import apply_affine
 import SimpleITK as sitk
 import json
 import tempfile
@@ -25,7 +27,21 @@ from dipy.tracking.streamline import transform_streamlines
 import nibabel as nib
 from time import process_time
 from multiprocessing import Pool, cpu_count
-
+from os.path import join as pjoin
+import numpy as np
+from dipy.io.image import load_nifti
+from dipy.io.stateful_tractogram import Space, StatefulTractogram
+from dipy.io.streamline import save_tractogram, load_tractogram
+from dipy.tracking.streamline import transform_streamlines
+import os
+import sys
+import argparse
+import numpy as np
+from dipy.io.streamline import load_tractogram, save_tractogram
+from dipy.tracking.streamline import transform_streamlines
+from dipy.io.stateful_tractogram import StatefulTractogram, Space
+import dipy
+from dipy.align import affine_registration
 
 def create_whole_brain_tract(tract_list, ref_image=None, **kwargs):
     """
@@ -66,8 +82,7 @@ def process_subject(subject_data, HCP_anat_root, HCP_tract_root_dest):
     return f'Processed: {sub_id}'
 
 
-def create_HCP_whole_brain_tract(HCP_tract_root, HCP_anat_root, HCP_tract_root_dest=None, 
-                                resume=True, n_jobs=-1, **kwargs):
+def create_HCP_whole_brain_tract(HCP_tract_root, HCP_anat_root, HCP_tract_root_dest=None, resume=True, n_jobs=-1, **kwargs):
     """
     Create a whole brain tractogram from the HCP dataset.
     
@@ -179,16 +194,75 @@ def register_template_to_subject(streamlines_file, reference_file, atlas_name='r
     res_dict =  run_cli_command('dipy_slr', inputs, output_patterns, entities_template=streamlines_file.get_entities(), command_args=command_args, **kwargs)
     return res_dict
 
-def register_subject_to_template(streamlines_file, reference_file, atlas_name='ref', **kwargs):
+from os.path import join as pjoin
+import numpy as np
+from dipy.io.image import load_nifti
+from dipy.io.stateful_tractogram import Space, StatefulTractogram
+from dipy.io.streamline import save_tractogram, load_tractogram
+from dipy.tracking.streamline import transform_streamlines
+import os
+import sys
+import argparse
+import numpy as np
+from dipy.io.streamline import load_tractogram, save_tractogram
+from dipy.tracking.streamline import transform_streamlines
+from dipy.io.stateful_tractogram import StatefulTractogram, Space
+import dipy
+
+# def register_anat(moving_path, static_path, tract_path,output_dir='.', transform_ref=False):
+
+#     moving, moving_affine = load_nifti(moving_path)
+#     static, static_affine = load_nifti(static_path)
+#     sft = load_tractogram(tract_path, moving_path, Space.RASMM,bbox_valid_check=False)
+
+#     # Very simple registration parameters
+#     pipeline = ["center_of_mass", "rigid", "affine"]
+
+
+#     warped_b0, warped_b0_affine = affine_registration(
+#             moving, static, moving_affine=moving_affine,
+#             static_affine=static_affine, pipeline=pipeline)
+
+
+#     print("Registration completed successfully.")
+
+
+#     moved_streamlines = transform_streamlines(
+#             sft.streamlines, np.linalg.inv(warped_b0_affine))
+
+#     moved_tractogram = StatefulTractogram(
+#         moved_streamlines, static_path, Space.RASMM)
+
+#     # Save the transformed tractogram
+#     save_tractogram(moved_tractogram, pjoin(output_dir, 'moved_tract.trk'), bbox_valid_check=False)
+#     print(f"Transformed tractogram saved to {pjoin(output_dir, 'moved_tract.trk')}")
+
+#     # Save the transformed reference image
+#     transformed_ref_path = pjoin(output_dir, 'moved_ref.nii.gz')
+#     if transform_ref:
+#         dipy.io.image.save_nifti(transformed_ref_path, warped_b0, static_affine)
+#         print(f"Transformed reference image saved to {transformed_ref_path}")
+
+#     #Save the affine matrix
+#     affine_matrix_path = pjoin(output_dir, 'affine_matrix.txt')
+#     np.savetxt(affine_matrix_path, warped_b0_affine)
+#     print(f"Affine matrix saved to {affine_matrix_path}")
+#     return output_dir
+
+def register_anat_to_template(subject, template_path, tractogram, atlas_name='ref', **kwargs):
     """
-    Register the streamlines to the reference file using the StreamlineLinearRegistration algorithm.
+    Register the anatomical subject to the template using the specified atlas.
 
     Parameters
     ----------
-    streamlines_file : ActiDepFile
+    subject : str
+        Path to the anatomical subject file
+    template_path : str
+        Path to the template file
+    tractogram : ActiDepFile
         ActiDepFile object containing the streamlines to register
-    reference_file : str
-        Path to the reference file
+    atlas_name : str
+        Name of the atlas to use for registration
     kwargs : dict
         Additional arguments to pass to the registration script
 
@@ -198,37 +272,94 @@ def register_subject_to_template(streamlines_file, reference_file, atlas_name='r
         Dictionary with registration output files
     """
 
-    reference_file = reference_file if isinstance(
-        reference_file, list) else [reference_file]
     inputs = {
-        "streamlines": streamlines_file
+        "tractogram": tractogram,
+        "subject": subject,
+        "template": template_path
     }
 
-    for i, ref in enumerate(reference_file):
-        inputs[os.path.basename(ref)] = ref
+    ants_registration(moving=subject, static=template_path)
 
-    # Prepare command arguments
-    command_args =  reference_file+['$streamlines']+ ['--out_moved', "ref_registered.trk"]
+def register_anat_subject_to_template(subject, template_path, tractogram, atlas_name='ref', **kwargs):
+    """
+    Register the anatomical subject to the template using the specified atlas.
 
-    output_patterns = {
-        "ref_registered.trk": {
-            "suffix": "tracto",
-            "datatype": "dwi",
-            "extension": "trk",
-            "space": atlas_name,
-            "atlas": "subject"
-        },
-        "affine.txt": {
+    Parameters
+    ----------
+    subject : str
+        Path to the anatomical subject file
+    template_path : str
+        Path to the template file
+    tractogram : ActiDepFile
+        ActiDepFile object containing the streamlines to register
+    atlas_name : str
+        Name of the atlas to use for registration
+    kwargs : dict
+        Additional arguments to pass to the registration script
+
+    Returns
+    -------
+    dict
+        Dictionary with registration output files
+    """
+
+    inputs = {
+        "tractogram": tractogram,
+        "subject": subject,
+        "template": template_path
+    }
+
+    #Move to a temporary directory
+    temp_dir = tempfile.mkdtemp()
+    os.chdir(temp_dir)
+
+    moving_img = ants.image_read(subject if isinstance(subject, str) else subject.path)
+    fixed_img = ants.image_read(template_path if isinstance(template_path, str) else template_path.path)
+
+    # Perform registration
+    registration = ants.registration(
+        fixed=fixed_img,
+        moving=moving_img,
+        type_of_transform='Affine',
+        verbose=True
+    )
+
+    # Save the transformation matrix to a file
+    transform_file = "/tmp/affine.mat"
+    # ANTs transforms are saved during registration, we just need to use the fwdtransforms
+    shutil.copy(registration['fwdtransforms'][0], transform_file)
+    # Apply the transformation to the moving image
+    moved_img = ants.apply_transforms(
+        fixed=fixed_img,
+        moving=moving_img,
+        transformlist=registration['fwdtransforms'],
+        interpolator='linear'
+    )
+
+    # Save the moved image
+    moved_img_path = "/tmp/moved_ref.nii.gz"
+    ants.image_write(moved_img, moved_img_path)
+
+    res_dict = {
+        transform_file: upt_dict(subject.get_entities(), {
             "suffix": "xfm",
-            "datatype": "tracto",
-            "extension": "txt",
             "from": "subject",
-            "to": atlas_name
-        }
+            "to": atlas_name,
+            "extension": "mat"
+        }),
+        moved_img_path: upt_dict(subject.get_entities(), {
+            "space": atlas_name
+        })
     }
 
-    res_dict =  run_cli_command('dipy_slr', inputs, output_patterns, entities_template=streamlines_file.get_entities(), command_args=command_args, **kwargs)
+    #Apply the affine transformation to the tractogram
+    moved_tractogram = apply_affine(tractogram, transform_file, reference=subject.path,target=moved_img_path)
+
+    res_dict[moved_tractogram] = upt_dict(tractogram.get_entities(), space = atlas_name,extension='trk')
+
     return res_dict
+
+    
 
 def call_recobundle(streamlines_file, model_file, **kwargs):
     """
