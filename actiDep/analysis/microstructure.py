@@ -242,8 +242,9 @@ class MCMVTKReader:
 
 # Exemple d'utilisation de la classe MCMVTKReader
 if __name__ == "__main__":
-    vtk_file = "/home/ndecaux/Data/actidep_bids/derivatives/mcm_tensors/sub-03011/tracto/sub-03011_desc-normalized_label-WM_model-MCM_tracto.vtk"
-    
+    # vtk_file = "/home/ndecaux/Data/actidep_bids/derivatives/mcm_tensors/sub-03011/tracto/sub-03011_desc-normalized_label-WM_model-MCM_tracto.vtk"
+
+    vtk_file = "/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/derivatives/mcm_tensors_staniz/sub-01002/tracto/sub-01002_desc-cleaned_model-MCM_tracto.vtk"    
     # Initialiser le lecteur
     reader = MCMVTKReader(vtk_file)
     

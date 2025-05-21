@@ -334,9 +334,6 @@ def apply_transform_trk(moving_path, trans_path,ref_path=None, output_dir=None):
     
 
 
-
-
-
 if __name__ == '__main__':
     subject = Subject('03011')
 

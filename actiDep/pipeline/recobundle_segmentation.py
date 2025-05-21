@@ -57,7 +57,7 @@ def process_anat_registration(subject, pipeline, template_path, atlas_name='HCP1
     # Get the anatomical image from the subject
     # anat = subject.get_unique(suffix='T1w', pipeline='msmt_csd', extension='nii.gz',space='B0')
     anat = subject.get_unique(metric='FA', pipeline='anima_preproc', extension='nii.gz')
-    tracto = subject.get_unique(suffix='tracto', pipeline='msmt_csd', label='WM',desc='normalized',algo='ifod2')
+    tracto = subject.get_unique(suffix='tracto', pipeline='msmt_csd', label='brain',desc='normalized',algo='ifod2',extension='trk')
     print(tracto)
     # Register the anatomical image to the template space
     res_dict = register_anat_subject_to_template(anat, template_path,tracto ,atlas_name=atlas_name, **kwargs)
@@ -81,7 +81,7 @@ def segment_bundle_in_atlas_space(subject, pipeline, bundle,atlas_name='HCP105Gr
         Name of the bundle to segment
     """
     # Load the whole brain tractography
-    whole_brain_tract = subject.get_unique(suffix='tracto', pipeline=pipeline, label='WM', space=atlas_name)
+    whole_brain_tract = subject.get_unique(suffix='tracto', pipeline=pipeline, label='brain',extension='trk', space=atlas_name)
 
     # Load the bundle template
     # template_path = f"/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/695768/tracts/{bundle}.trk"
@@ -140,8 +140,9 @@ if __name__ == "__main__":
     models_dir='/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/'
     bundle_list= [x.replace('summed_','').split('.')[0] for x in os.listdir(models_dir) if x.endswith('.trk')]
     for bundle in bundle_list:
-        print('Processing bundle:',bundle)
-        segment_bundle_in_atlas_space(subject, pipeline='recobundle_segmentation', bundle=bundle, no_slr= CLIArg('--no_slr', ''), atlas_name='HCP105Group1Clustered')
+        if any(x in bundle for x in ['CC','CST','UF']):
+            print('Processing bundle:',bundle)
+            segment_bundle_in_atlas_space(subject, pipeline='recobundle_segmentation', bundle=bundle, no_slr= CLIArg('--no_slr', ''), atlas_name='HCP105Group1Clustered', pruning_thr=CLIArg('--pruning_thr',5) )
     # segment_subject_recobundle(subject, pipeline='recobundle_segmentation')
     # bundles = os.listdir('/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/695768/tracts/')
     # for bundle in bundles:

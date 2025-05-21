@@ -22,6 +22,7 @@ from time import process_time
 import vtk
 from dipy.tracking.streamline import transform_streamlines
 from scipy.io import loadmat
+import nibabel as nib
 
 
 def rotation(in_file, out_file, angle=180, x=0, y=0, z=1):
@@ -143,11 +144,12 @@ def apply_affine(tracto, affine_mat, reference, target):
     # Apply the affine transformation
 
     tractogram.streamlines = transform_streamlines(tractogram.streamlines, affine_matrix)
-    
+
     tractogram= StatefulTractogram(tractogram.streamlines, target, Space.RASMM)
 
+    file_extension = tracto.path.split('.')[-1]
     # Save the transformed tractogram
-    output_file = f'{temp_dir}/transformed_tractogram.trk'
+    output_file = f'{temp_dir}/transformed_tractogram.{file_extension}'
     save_tractogram(tractogram, output_file, bbox_valid_check=False)
     return output_file
 
@@ -191,15 +193,172 @@ def generate_trekker_tracto(odf, seeds, n_seeds=1000, **kwargs):
     # call(["trekker_linux", "convert", tract_path, tract_path.replace('.vtk','.tck'), '--force'])
 
     result_dict[tract_path.replace('.vtk', '_rotated.vtk')] = upt_dict(tract_entities, orient='LPS')
+
+    return result_dict
+
+
+def generate_trekker_tracto_tck(odf, seeds, n_seeds=1000, **kwargs):
+
+    inputs = {"odf": odf, "seeds": seeds}
+
+    # odf_to_lps = run_cli_command('convert_fod', {'odf': odf}, {'odf_lps.nii.gz': odf.get_entities()}, command_args=[
+    #                              '-i', odf.path, '-o', 'odf_lps.nii.gz', '-c', 'MRTRIX2ANIMA'])
+    # #Get first key of odf_to_lps
+    # odf_to_lps = list(odf_to_lps.keys())[0]
+
+    command_args = [
+        "track", odf.path, "--seed",
+        seeds if isinstance(seeds, str) else seeds.path, "--seed_count",
+        str(n_seeds), "-o", "tracto.tck", "--force"
+    ]
+
+    output_patterns = {
+        "tracto.vtk": {
+            "suffix": "tracto",
+            "datatype": "tracto",
+            "extension": "tck"
+        }
+    }
+    result_dict = run_cli_command('trekker_linux',
+                                  inputs,
+                                  output_patterns,
+                                  entities_template=odf.get_entities(),
+                                  command_args=command_args,
+                                  **kwargs,
+                                  use_sym_link=True)
+
+    return result_dict
+
+
+def _find_tractogram_endings(tractogram, reference):
+    """
+    Get the endings segmentation of the streamlines in the tractogram.
+
+    Parameters
+    ----------
+    tractogram : StatefulTractogram
+        The tractogram to process.
+        
+    reference : str
+        The reference image
+
+    Returns
+    -------
+    endings : dict
+        Dictionary containing the start and end segmentations of the streamlines in the tractogram.
+    """
+    # Load reference image
+    import nibabel as nib
+    ref_img = nib.load(reference)
+    shape = ref_img.shape
+    affine = ref_img.affine
+    
+    # Ensure tractogram is in the correct space
+    tractogram.to_space(Space.RASMM)
+    
+    # Create empty volumes for start and end points
+    start_volume = np.zeros(shape, dtype=np.int32)
+    end_volume = np.zeros(shape, dtype=np.int32)
+    
+    # Get the inverse affine to convert from mm to voxel coordinates
+    inv_affine = np.linalg.inv(affine)
+    
+    # Convert streamline endpoints to voxel coordinates
+    for streamline in tractogram.streamlines:
+        if len(streamline) < 2:
+            continue
+            
+        # Get the start and end points of the streamline
+        start_point = streamline[0]
+        end_point = streamline[-1]
+        
+        # Transform points from RAS mm to voxel space
+        start_voxel = np.round(nib.affines.apply_affine(inv_affine, start_point)).astype(int)
+        end_voxel = np.round(nib.affines.apply_affine(inv_affine, end_point)).astype(int)
+        
+        # Check if points are within volume bounds
+        if (0 <= start_voxel[0] < shape[0] and 
+            0 <= start_voxel[1] < shape[1] and 
+            0 <= start_voxel[2] < shape[2]):
+            start_volume[start_voxel[0], start_voxel[1], start_voxel[2]] += 1
+            
+        if (0 <= end_voxel[0] < shape[0] and 
+            0 <= end_voxel[1] < shape[1] and 
+            0 <= end_voxel[2] < shape[2]):
+            end_volume[end_voxel[0], end_voxel[1], end_voxel[2]] += 1
+    
+    # Create NIfTI images
+    start_img = nib.Nifti1Image(start_volume, affine)
+    end_img = nib.Nifti1Image(end_volume, affine)
+    
+    return {'start': start_img, 'end': end_img}
+
+
+def get_tractogram_endings(tractogram_file, reference):
+    """
+    Get the endings segmentation of the streamlines in the tractogram.
+
+    Parameters
+    ----------
+    tractogram : ActiDepFile or str
+        The tractogram to process.
+        
+    reference : ActiDepFile or str
+        The reference image
+
+    Returns
+    -------
+    result_dict : dict
+        A dictionary containing the path to the generated endings segmentation files (beginning and end of each streamline).
+    """
+    # Create a temporary directory
+    temp_dir = tempfile.mkdtemp()
+
+    tracto_path = tractogram_file if isinstance(tractogram_file, str) else tractogram_file.path
+    ref_path = reference if isinstance(reference, str) else reference.path
+    
+    # Load the tractogram
+    tractogram = load_tractogram(tracto_path, ref_path)
+    
+    # Get the tractogram entities if available
+    if hasattr(tractogram_file, 'get_entities'):
+        entities = tractogram_file.get_entities()
+    else:
+        # Create basic entities if not available
+        filename = os.path.basename(tracto_path)
+        entities = parse_filename(filename)
+    
+    # Get the endings segmentation
+    endings = _find_tractogram_endings(tractogram, ref_path)
+    
+    # Save the endings segmentation
+    start_file = f'{temp_dir}/streamlines_start.nii.gz'
+    end_file = f'{temp_dir}/streamlines_end.nii.gz'
+    
+    nib.save(endings['start'], start_file)
+    nib.save(endings['end'], end_file)
+    
+    # Create a dictionary to store the results
+    result_dict = {
+        start_file: upt_dict(entities, suffix='mask', label='start', desc='endings', datatype='tracto', extension='nii.gz'),
+        end_file: upt_dict(entities, suffix='mask', label='end', desc='endings', datatype='tracto', extension='nii.gz')
+    }
     
     return result_dict
 
 
 if __name__ == "__main__":
-    sub = Subject("03011")
-    odf = sub.get_unique(suffix='fod',  desc='preproc', label='WM')
-    seeds = sub.get_unique(suffix='mask', label='WM', space='B0')
+    # subject = Subject("03011")
+    # odf = sub.get_unique(suffix='fod',  desc='preproc', label='WM')
+    # seeds = sub.get_unique(suffix='mask', label='WM', space='B0')
 
-    output_dict = generate_ifod2_tracto(odf, seeds)
+    # output_dict = generate_ifod2_tracto(odf, seeds)
     # pprint(output_dict)
     # copy_from_dict(sub, output_dict,pipeline='msmt_csd')
+
+    # odf = sub.get_unique(suffix='fod',  desc='preproc', label='WM')
+    tracto = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/derivatives/bundle_seg/sub-03011/tracto/sub-03011_bundle-CSTleft_desc-cleaned_tracto.trk'
+
+    ref = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/derivatives/anima_preproc/sub-03011/dwi/sub-03011_metric-FA_model-DTI_dwi.nii.gz'
+
+    print(get_tractogram_endings(tracto, ref))

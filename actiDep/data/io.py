@@ -274,8 +274,14 @@ def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False, **kwargs):
     }
     """
     mapping={}
+    #drop pipeline if in kwargs and is not None
+    if 'pipeline' in kwargs and kwargs['pipeline'] is not None:
+        del kwargs['pipeline']
+    
     for src_file, entities in file_dict.items():
         entities.update(kwargs)
+        if 'pipeline' in entities and pipeline is not None:
+            del entities['pipeline']
         dest_file = subject.build_path(
             original_name=os.path.basename(src_file), **entities, pipeline=pipeline)
         if not dry_run:

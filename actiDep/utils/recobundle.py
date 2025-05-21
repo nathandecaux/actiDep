@@ -314,6 +314,7 @@ def register_anat_subject_to_template(subject, template_path, tractogram, atlas_
     os.chdir(temp_dir)
 
     moving_img = ants.image_read(subject if isinstance(subject, str) else subject.path)
+    print(template_path)
     fixed_img = ants.image_read(template_path if isinstance(template_path, str) else template_path.path)
 
     # Perform registration
@@ -405,6 +406,57 @@ def call_recobundle(streamlines_file, model_file, **kwargs):
 
     res_dict = run_cli_command('dipy_recobundles', inputs, output_patterns, entities_template=streamlines_file.get_entities(), **kwargs)
     return res_dict
+
+
+def process_bundleseg(streamlines_file, fa_file, atlas_dir='/home/ndecaux/Data/SCIL_Atlas/',**kwargs):
+    """
+    Process the bundle segmentation using the BundleSeg pipeline.
+    """
+    #Create a temporary directory with the name of the subject
+    sub_name = streamlines_file.get_entities()['subject']
+    temp_dir = tempfile.mkdtemp(prefix=sub_name + "_")
+    
+    # temp_dir = tempfile.mkdtemp()
+    os.chdir(temp_dir)
+
+    #Create symbolic links to the input files in temp_dir/S1/
+    streamlines_path = streamlines_file if isinstance(streamlines_file, str) else streamlines_file.path
+
+    fa_path = fa_file if isinstance(fa_file, str) else fa_file.path
+
+    if not streamlines_path.endswith('.trk'):
+        #Call flip_tractogram to convert to trk
+        #eg : flip_tractogram $streamlines_path $streamlines_path.trk --reference $fa_path 
+        old_streamlines_path = streamlines_path
+        streamlines_path = old_streamlines_path.split('.')[0] + '.trk'
+
+        if not os.path.exists(streamlines_path):
+            call(['flip_tractogram', old_streamlines_path, streamlines_path, '--reference', fa_path])
+
+    os.makedirs("S1", exist_ok=True)
+    temp_streamlines = os.path.abspath(os.path.join("S1", 'tracking.trk'))
+    temp_fa = os.path.abspath(os.path.join("S1", 'fa.nii.gz'))
+    
+    shutil.copy(streamlines_path, temp_streamlines)
+    shutil.copy(fa_path, temp_fa)
+    
+    inputs = {
+        "streamlines": temp_streamlines,
+        "fa": temp_fa,
+    }
+
+    rbx_dir = '/home/ndecaux/Git/rbx_flow'
+
+    cmd = f'run {rbx_dir}/main_HCP.nf --input {temp_dir} --atlas_directory {atlas_dir} -with-singularity {rbx_dir}/scilus_latest.sif -w {temp_dir}'
+    cmd = cmd.split(' ')
+    #Set the following environment variable : NXF_VER=21.04.0
+    os.environ['NXF_VER'] = '21.10.0'
+
+    run_cli_command('nextflow', inputs, {}, entities_template=streamlines_file.get_entities(), command_args=cmd, **kwargs)
+
+    
+
+
 
 
 if __name__ == "__main__":

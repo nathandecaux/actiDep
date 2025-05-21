@@ -340,6 +340,8 @@ def fixel_to_peaks(fixels, **kwargs):
     """
     fixels_obj = FixelFile(fixels.path)
 
+    fixels_obj = fixels_obj
+
     inputs = {
         "fixels": fixels
     }

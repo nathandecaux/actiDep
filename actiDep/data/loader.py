@@ -301,26 +301,41 @@ class Subject:
 
 class Actidep:
     def __init__(self, db_root='/home/ndecaux/Data/actidep_bids'):
-        __abstract__ = True
+        __abstract__ = True  # Preserved from original code
         self.db_root = db_root
-        self.layout = BIDSLayout(self.db_root, derivatives=True)
-        self.subjects = self.layout.get_subjects()
+        self.layout = BIDSLayout(self.db_root, derivatives=True, validate=False)
+        
+        # Get subject IDs from the layout
+        self.subject_ids = self.layout.get_subjects()
+        
+        # # Create a list of Subject objects
+        # self.subjects = [Subject(sub_id, self.db_root) for sub_id in subject_ids]
 
     def get(self, sub_id, **kwargs):
-        subject = Subject(sub_id)
+        # This method creates a new Subject instance on-demand.
+        # It could be modified to retrieve from self.subjects if desired,
+        # but the prompt focuses on __init__.
+        subject = Subject(sub_id, self.db_root)
         return subject.get(**kwargs)
 
-    def get_subjects(self):
-        return self.subjects
-
+    def get_subject(self, sub_id):
+        """
+        Return the Subject object associated with this ID.
+        """
+        if sub_id in self.subject_ids:
+            return Subject(sub_id, self.db_root)
+        else:
+            raise ValueError(f"Subject {sub_id} not found in the dataset.")
 
 if __name__ == "__main__":
-    subject = Subject('03011')
-    sub = subject.get(model='DTI', metric='FA')[0]
-    print(sub.filename)
-    # Print the full path
+    ds = Actidep('/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+    print(ds.get_subjects())
+    # subject = Subject('03011')
+    # sub = subject.get(model='DTI', metric='FA')[0]
+    # print(sub.filename)
+    # # Print the full path
 
-    example = subject.get(suffix='dwi', extension='bvec', scope='raw')
+    # example = subject.get(suffix='dwi', extension='bvec', scope='raw')
 
-    print(example)
-    pprint(subject.get_entity_values())
+    # print(example)
+    # pprint(subject.get_entity_values())

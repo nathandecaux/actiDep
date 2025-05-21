@@ -7,11 +7,11 @@ import sys
 import pathlib
 from subprocess import call
 from actiDep.set_config import set_config
-from actiDep.data.loader import Subject
+from actiDep.data.loader import Subject, Actidep
 from actiDep.data.io import copy2nii, move2nii, copy_list, copy_from_dict
 from actiDep.utils.tools import del_key, upt_dict, create_pipeline_description, CLIArg
 from actiDep.utils.fod import get_tissue_responses, get_msmt_csd, get_peaks, normalize_fod, fod_to_fixels, get_peak_density, fixel_to_peaks
-from actiDep.utils.tractography import generate_ifod2_tracto,generate_trekker_tracto
+from actiDep.utils.tractography import generate_ifod2_tracto,generate_trekker_tracto, generate_trekker_tracto_tck
 import tempfile
 import glob
 import shutil
@@ -99,8 +99,10 @@ def process_fixels2peaks(subject, pipeline, **kwargs):
     """Convert fixels to peaks"""
     fixels = subject.get_unique(extension='fixel', label='WM', pipeline=pipeline)
     peaks = fixel_to_peaks(fixels, **kwargs)
-    entities = upt_dict(fixels.get_entities(), suffix='peaks', extension='nii.gz', pipeline=pipeline)
-    subject.write_object(peaks, **entities)
+    print(peaks)
+    copy_from_dict(subject, peaks, pipeline=pipeline)
+    # entities = upt_dict(fixels.get_entities(), suffix='peaks', extension='nii.gz', pipeline=pipeline,desc='fixels2peaks')
+    # subject.write_object(peaks, **entities)
 
 def process_fixel_density(subject, pipeline, **kwargs):
     """Calculate density from fixel peaks"""
@@ -119,8 +121,8 @@ def process_ifod2_tracto(subject, pipeline, **kwargs):
 def process_trekker_tracto(subject, pipeline, **kwargs):
     """Run Trekker tractography"""
     odf = subject.get_unique(suffix='fod', label='WM', desc='normalized', pipeline=pipeline)
-    seeds = subject.get_unique(suffix='mask', label='WM', space='B0')
-    tracto = generate_trekker_tracto(odf,seeds, **kwargs)
+    seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
+    tracto = generate_trekker_tracto_tck(odf,seeds, **kwargs)
     copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='trekker')
 
 
@@ -149,8 +151,8 @@ def process_msmt_csd(subject):
         # 'peak_density',
         # 'fixels2peaks',
         # "fixel_density",
-        'ifod2_tracto',
-        # 'trekker_tracto'
+        # 'ifod2_tracto',
+        'trekker_tracto'
     ]
     
     # Get DWI data that will be used across multiple steps
@@ -168,7 +170,7 @@ def process_msmt_csd(subject):
         'fixels2peaks': lambda: process_fixels2peaks(subject, pipeline),
         'fixel_density': lambda: process_fixel_density(subject, pipeline),
         'ifod2_tracto': lambda: process_ifod2_tracto(subject, pipeline,n_streams=CLIArg('-select', 1000000)),
-        'trekker_tracto': lambda: process_trekker_tracto(subject, pipeline,n_seeds=500000)
+        'trekker_tracto': lambda: process_trekker_tracto(subject, pipeline,n_seeds=1000000)
     }
     
     for step in pipeline_list:
@@ -180,6 +182,26 @@ def process_msmt_csd(subject):
 
 
 if __name__ == "__main__":
-    config, tools = set_config()
-    subject = Subject('03011')
-    process_msmt_csd(subject)
+    #If hostname is calcarine, set tempdir to /local/ndecaux/tmp
+
+    # if os.uname()[1] == 'calcarine':
+    #     tempfile.tempdir = '/local/ndecaux/tmp'
+
+    # config, tools = set_config()
+    # print("MSMT-CSD pipeline")
+    # print("=====================================")
+    # print('Reading dataset')
+    # ds = Actidep('/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+    # print(f"Found {len(ds.subject_ids)} subjects")
+    # print("=====================================")
+    # for sub in ds.subject_ids:
+    #     subject = ds.get_subject(sub)
+    #     if len(subject.get(suffix='tracto', algo='ifod2', pipeline='msmt_csd', extension='tck')) == 1:
+    #         print(f"Skipping subject {sub} as tractography already exists")
+    #         continue
+    #     print(f"Processing subject: {sub}")
+    #     process_msmt_csd(subject)
+
+    # sub = Subject('01001','/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+    # process_msmt_csd(sub)
+    process_msmt_csd('03011')

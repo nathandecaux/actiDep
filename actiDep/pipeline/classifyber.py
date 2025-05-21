@@ -44,8 +44,9 @@ def classifyber_register_to_mni(subject,template_path="/home/ndecaux/Git/app-cla
     """
     # Get the FA image from the subject
     anat = subject.get_unique(metric='FA', pipeline='anima_preproc', extension='nii.gz')
-    tracto = subject.get_unique(suffix='tracto', pipeline='msmt_csd', label='WM',desc='normalized',algo='ifod2',extension='tck')
+    tracto = subject.get_unique(suffix='tracto', pipeline='msmt_csd', label='brain',desc='normalized',algo='ifod2',extension='tck')
 
+    print(template_path)
     # Register the anatomical image to the template space
     res_dict = register_anat_subject_to_template(anat, template_path=template_path,tractogram=tracto,atlas_name=atlas_name, **kwargs)
 
@@ -59,5 +60,5 @@ if __name__ == "__main__":
     subject = Subject('03011')
     pipeline = 'classifyber'
     init_pipeline(subject, pipeline)
-    # classifyber_register_to_mni(subject, pipeline)
+    # classifyber_register_to_mni(subject, pipeline=pipeline)
     classifyber_register_to_mni(subject, pipeline='DeepWMA',template_path="/home/ndecaux/Git/DeepWMA_v2/SegModels/100HCP-population-mean-T2.nii.gz",atlas_name='100HCP')

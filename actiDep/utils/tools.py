@@ -46,6 +46,9 @@ def run_cli_command(command_name, inputs, output_pattern, entities_template={},
     tmp_folder = tempfile.mkdtemp()
     os.chdir(tmp_folder)
     
+    if prepare_inputs_fn is not None:
+        use_sym_link = False  # Si une fonction de préparation est fournie, on ne peut pas utiliser de liens symboliques
+
     # Copie des fichiers d'entrée
     tmp_inputs = {}
     for name, file_obj in inputs.items():
