@@ -1,7 +1,7 @@
 import os
 from flask import Flask, jsonify, request, render_template, send_file
 from flask_cors import CORS
-from bids import BIDSLayout
+from ancpbids import ancpbids as bidsLayout
 from actiDep.set_config import set_config
 from actiDep.data.loader import Subject, ActiDepFile
 import pandas as pd

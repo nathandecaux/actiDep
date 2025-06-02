@@ -3,3 +3,9 @@ tests/HCP_Sample/*
 *.tck
 .vscode
 *.log
+subjects_all.txt
+subjects_small.txt
+subjects.txt
+ist
+output_subplots
+*.pdf

@@ -116,7 +116,7 @@ def process_ifod2_tracto(subject, pipeline, **kwargs):
     odf = subject.get_unique(suffix='fod', label='WM', desc='normalized', pipeline=pipeline)
     seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
     tracto = generate_ifod2_tracto(odf, seeds, **kwargs)
-    copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='ifod2',label='brain')
+    copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='ifod2',label='brain',desc='pouet')
 
 def process_trekker_tracto(subject, pipeline, **kwargs):
     """Run Trekker tractography"""
@@ -151,8 +151,8 @@ def process_msmt_csd(subject):
         # 'peak_density',
         # 'fixels2peaks',
         # "fixel_density",
-        # 'ifod2_tracto',
-        'trekker_tracto'
+        'ifod2_tracto',
+        # 'trekker_tracto'
     ]
     
     # Get DWI data that will be used across multiple steps
@@ -202,6 +202,7 @@ if __name__ == "__main__":
     #     print(f"Processing subject: {sub}")
     #     process_msmt_csd(subject)
 
-    # sub = Subject('01001','/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+    sub = Subject('01001','/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
     # process_msmt_csd(sub)
-    process_msmt_csd('03011')
+    
+    process_msmt_csd(sub)

@@ -254,6 +254,20 @@ class MCMFile:
             return self.compartments[num]
         return None
 
+    def get_weights(self):
+        """
+        Récupère le chemin du fichier de poids. Décompresse l'archive dans un répertoire temporaire si nécessaire.
+        Returns
+        -------
+        str or None
+            Chemin vers le fichier de poids, ou None si non trouvé
+        """
+        if hasattr(self, 'weights'):
+            return self.weights
+        
+        # Si le fichier de poids n'est pas trouvé, retourner None
+        return None
+
 def read_mcm_file(mcm_file):
     """
     Read the MCM file and return dictionary containing model structure.

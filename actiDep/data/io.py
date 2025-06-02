@@ -1,5 +1,5 @@
-from bids import BIDSLayout
 import bids
+import ancpbids
 from os.path import join as opj
 import os
 import SimpleITK as sitk
@@ -248,6 +248,9 @@ def copy_list(dest, file_list):
             src_path = str(f)
         elif isinstance(f, bids.layout.BIDSFile):
             src_path = f.path
+        elif isinstance(f, ancpbids.ANCFile):
+            src_path = f.path
+        
         elif isinstance(f, ActiDepFile):
             src_path = f.path
         else:

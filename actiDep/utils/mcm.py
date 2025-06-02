@@ -25,6 +25,7 @@ from scipy.ndimage import map_coordinates
 from scipy.interpolate import griddata, interpn
 import numpy as np
 import nibabel as nib
+import time
 
 
 def mcm_estimator(dwi, bval, bvec, mask, compart_map=None, n_comparts=None, **kwargs):
@@ -345,7 +346,7 @@ def generate_scalar_map(vtk_file_path, reference_nifti_path, output_dir, output_
         num_components = array.GetNumberOfComponents()
 
         # Skip arrays with multiple components for simplicity
-        if num_components > 1 or not 'Fractional' in array_name:
+        if num_components > 1:
             print(
                 f"Skipping array '{array_name}' with {num_components} components")
             continue
@@ -431,25 +432,42 @@ def add_mcm_to_tracts(tracts, mcm_file, reference=None, **kwargs):
     temp_dir_for_conversion = None  # To store path to temp directory if created
     converted_input_vtk_path = tracts.path
 
+    mcm_obj = MCMFile(mcm_file.path)
+
+
     if tracts_extension != 'vtk':
         if reference is None:
             raise ValueError(
                 "Reference image is required for tractogram conversion.")
 
-        temp_dir_for_conversion = tempfile.mkdtemp()
+        temp_dir_for_conversion = tempfile.mkdtemp(suffix='tracts_conversion')
+
+        print("Temporary directory for conversion:", temp_dir_for_conversion, os.path.exists(temp_dir_for_conversion))
+        os.chdir(temp_dir_for_conversion)
+        
         base_name = os.path.basename(tracts.path)
         vtk_name = os.path.splitext(base_name)[0] + '.vtk'
         converted_input_vtk_path = opj(temp_dir_for_conversion, vtk_name)
 
+        mcm_weights = mcm_obj.get_weights()
+        print("MCM Weights file:", mcm_weights)
+
         cmd = [
             "flip_tractogram", tracts.path, converted_input_vtk_path, "--reference",
-            reference.path, "-ft", "ras2lps"
+            reference.path
         ]
         print("Converting tracts to VTK format...")
         print("Command:", ' '.join(cmd))
         call(cmd)
 
-    mcm_obj = MCMFile(mcm_file.path)
+        #Now call flip_vtk
+        cmd = [
+            "flip_vtk", converted_input_vtk_path, converted_input_vtk_path,'--compartment_map_file',mcm_weights
+        ]
+        print("Flipping VTK tracts...")
+        print("Command:", ' '.join(cmd))
+        call(cmd)
+
 
     # Output filename for animaTracksMCMPropertiesExtraction, relative to its execution directory
     output_vtk_filename_in_tmp = "tracts_mcm_out.vtk"
@@ -478,9 +496,9 @@ def add_mcm_to_tracts(tracts, mcm_file, reference=None, **kwargs):
         **kwargs
     )
 
-    # Cleanup the temporary directory used for VTK conversion
-    if temp_dir_for_conversion:
-        shutil.rmtree(temp_dir_for_conversion)
+    # # Cleanup the temporary directory used for VTK conversion
+    # if temp_dir_for_conversion:
+    #     shutil.rmtree(temp_dir_for_conversion)
 
     if not cli_results:
         print("Error: animaTracksMCMPropertiesExtraction failed or produced no output.")
@@ -546,7 +564,7 @@ def add_mcm_to_tracts(tracts, mcm_file, reference=None, **kwargs):
                 base_entities.copy(),
                 model="MCM",
                 extension="nii.gz",
-                desc=f"{array_desc_name}"
+                metric=f"{array_desc_name}"
             )
 
     pprint(final_results)

@@ -7,7 +7,7 @@ import sys
 import pathlib
 from subprocess import call
 from actiDep.set_config import set_config
-from actiDep.data.loader import Subject, move2nii, parse_filename, ActiDepFile, copy2nii
+from actiDep.data.loader import Subject, parse_filename, ActiDepFile
 from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli, run_cli_command, run_mrtrix_command
 from actiDep.utils.registration import ants_registration
 from actiDep.utils.tractography import apply_affine
