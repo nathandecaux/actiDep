@@ -76,20 +76,20 @@ def process_normalize(subject, pipeline, **kwargs):
 
 def process_fixels(subject, pipeline, **kwargs):
     """Perform fixel-based analysis"""
-    wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='normalized', suffix='fod')
+    wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='preproc', suffix='fod')
     mask = subject.get_unique(suffix='mask', label='brain', datatype='dwi', space='B0')
     res_dict = fod_to_fixels(fod=wm_fod, mask=mask, max_peaks=CLIArg('maxnum', 3), **kwargs)
     copy_from_dict(subject, res_dict, pipeline=pipeline)
 
 def process_peaks(subject, pipeline, **kwargs):
     """Perform peak extraction"""
-    wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='normalized', suffix='fod')
+    wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='preproc', suffix='fod')
     peaks_dict = get_peaks(wm_fod, **kwargs)
     copy_from_dict(subject, peaks_dict, pipeline=pipeline)
 
 def process_peak_density(subject, pipeline, **kwargs):
     """Calculate peak density from peaks"""
-    peaks = subject.get_unique(suffix='peaks', label='WM', desc='normalized', pipeline=pipeline)
+    peaks = subject.get_unique(suffix='peaks', label='WM', desc='preproc', pipeline=pipeline)
     peak_density = get_peak_density(peaks, **kwargs)
     entities = peaks.get_entities()
     entities = upt_dict(entities, suffix='density', extension='nii.gz', pipeline=pipeline)
@@ -113,14 +113,14 @@ def process_fixel_density(subject, pipeline, **kwargs):
 
 def process_ifod2_tracto(subject, pipeline, **kwargs):
     """Run iFOD2 tractography"""
-    odf = subject.get_unique(suffix='fod', label='WM', desc='normalized', pipeline=pipeline)
+    odf = subject.get_unique(suffix='fod', label='WM', desc='preproc', pipeline=pipeline)
     seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
     tracto = generate_ifod2_tracto(odf, seeds, **kwargs)
     copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='ifod2',label='brain',desc='pouet')
 
 def process_trekker_tracto(subject, pipeline, **kwargs):
     """Run Trekker tractography"""
-    odf = subject.get_unique(suffix='fod', label='WM', desc='normalized', pipeline=pipeline)
+    odf = subject.get_unique(suffix='fod', label='WM', desc='preproc', pipeline=pipeline)
     seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
     tracto = generate_trekker_tracto_tck(odf,seeds, **kwargs)
     copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='trekker')
@@ -202,7 +202,7 @@ if __name__ == "__main__":
     #     print(f"Processing subject: {sub}")
     #     process_msmt_csd(subject)
 
-    sub = Subject('01001','/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+    sub = Subject('00001','/home/ndecaux/Code/Data/comascore')
     # process_msmt_csd(sub)
     
     process_msmt_csd(sub)

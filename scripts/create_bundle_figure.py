@@ -14,12 +14,60 @@ from matplotlib.lines import Line2D
 import re
 import sys
 
+# Configuration - mettre à True pour filtrer selon subjects.txt
+FILTER_BY_SUBJECTS_FILE = True  # Changer à False pour traiter tous les bundles
+
+def load_subjects_from_file(subjects_file_path):
+    """
+    Charge la liste des sujets depuis le fichier subjects.txt
+    Retourne un set des subject_ids
+    """
+    subjects = set()
+    try:
+        with open(subjects_file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Ignorer les commentaires et les lignes vides
+                if line and not line.startswith('#') and not line.startswith('subject_id'):
+                    parts = line.split()
+                    if len(parts) >= 1:
+                        subjects.add(parts[0])  # Premier élément est le subject_id
+        print(f"Sujets trouvés dans {subjects_file_path}: {sorted(subjects)}")
+    except Exception as e:
+        print(f"Erreur lors de la lecture du fichier {subjects_file_path}: {e}", file=sys.stderr)
+        return set()
+    return subjects
+
+def filter_bundles_by_subjects(bundles, valid_subjects):
+    """
+    Filtre les bundles pour ne garder que ceux correspondant aux sujets valides
+    """
+    filtered_bundles = []
+    for bundle in bundles:
+        # Extraire le subject_id du nom du bundle
+        # Assumer que le format est quelque chose comme "sub-XXXXX_bundle_name"
+        parts = bundle.split('_')
+        if len(parts) > 0:
+            potential_subject = parts[0]
+            if potential_subject in valid_subjects:
+                filtered_bundles.append(bundle)
+    return filtered_bundles
+
 # Dossier contenant les images
 input_dir = "/home/ndecaux/Code/actiDep/ist/FW_with3d/good_subplots"
 output_dir = "/home/ndecaux/Code/actiDep/output_subplots"
+subjects_file = "/home/ndecaux/Code/actiDep/subjects.txt"
 
 # Créer le dossier de sortie s'il n'existe pas
 os.makedirs(output_dir, exist_ok=True)
+
+# Charger la liste des sujets valides si le filtrage est activé
+valid_subjects = set()
+if FILTER_BY_SUBJECTS_FILE:
+    valid_subjects = load_subjects_from_file(subjects_file)
+    if not valid_subjects:
+        print("Aucun sujet trouvé dans le fichier subjects.txt, traitement de tous les bundles.")
+        FILTER_BY_SUBJECTS_FILE = False
 
 # Obtenir la liste des fichiers dans le dossier
 try:
@@ -32,6 +80,12 @@ except Exception as e:
 # Filtrer les fichiers pour obtenir les images 2D et 3D
 bundles_2d = [f for f in files if not f.startswith("tractometry_results_")]
 bundles_3d = [f for f in files if f.startswith("tractometry_results_")]
+
+# Filtrer par sujets si activé
+if FILTER_BY_SUBJECTS_FILE and valid_subjects:
+    bundles_2d = filter_bundles_by_subjects(bundles_2d, valid_subjects)
+    bundles_3d = filter_bundles_by_subjects(bundles_3d, valid_subjects)
+
 print(f"Images 2D trouvées: {bundles_2d}")
 print(f"Images 3D trouvées: {bundles_3d}")
 

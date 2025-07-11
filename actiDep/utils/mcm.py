@@ -6,7 +6,7 @@ import pandas as pd
 import sys
 import pathlib
 from subprocess import call
-from actiDep.set_config import set_config
+from actiDep.set_config import set_config, get_HCP_bundle_names
 from actiDep.data.loader import Subject, move2nii, parse_filename, ActiDepFile, copy2nii
 from actiDep.data.mcmfile import MCMFile, read_mcm_file
 from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli, CLIArg, run_anima_command, run_cli_command
@@ -20,14 +20,171 @@ import ants
 import xml.etree.ElementTree as ET
 import zipfile
 import vtk
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from scipy.ndimage import map_coordinates
-from scipy.interpolate import griddata, interpn
+from scipy.interpolate import griddata, interpn, interp1d
+from scipy.spatial import cKDTree
 import numpy as np
 import nibabel as nib
 import time
+from vtk.numpy_interface import dataset_adapter as dsa
+from pathlib import Path
+import vtkmodules.vtkInteractionStyle
+# noinspection PyUnresolvedReferences
+import vtkmodules.vtkRenderingOpenGL2
+from vtkmodules.vtkCommonColor import vtkNamedColors
+from vtkmodules.vtkFiltersSources import vtkCylinderSource
+from vtkmodules.vtkRenderingCore import (
+    vtkActor,
+    vtkPolyDataMapper,
+    vtkRenderWindow,
+    vtkRenderWindowInteractor,
+    vtkRenderer
+)
+# noinspection PyUnresolvedReferences
+import vtkmodules.vtkInteractionStyle
+# noinspection PyUnresolvedReferences
+import vtkmodules.vtkRenderingFreeType
+# noinspection PyUnresolvedReferences
+import vtkmodules.vtkRenderingOpenGL2
+from vtkmodules.vtkCommonColor import vtkNamedColors
+from vtkmodules.vtkCommonComputationalGeometry import vtkCardinalSpline
+from vtkmodules.vtkCommonCore import (
+    vtkMinimalStandardRandomSequence, vtkPoints
+)
+from vtkmodules.vtkCommonDataModel import (
+    vtkCellArray,
+    vtkPolyData)
+from vtkmodules.vtkFiltersCore import vtkGlyph3D
+from vtkmodules.vtkFiltersGeneral import vtkSplineFilter
+from vtkmodules.vtkFiltersSources import vtkSphereSource
+from vtkmodules.vtkIOXML import vtkXMLPolyDataReader
+from vtkmodules.vtkRenderingCore import (
+    vtkActor,
+    vtkPolyDataMapper,
+    vtkRenderer,
+    vtkRenderWindow,
+    vtkRenderWindowInteractor
+)
+from actiDep.data.loader import Actidep
 
+from dipy.io.streamline import load_tractogram, save_tractogram
+from dipy.tracking.utils import length
+from dipy.segment.metric import AveragePointwiseEuclideanMetric
 
+from dipy.segment.clustering import QuickBundles
+from dipy.segment.metric import AveragePointwiseEuclideanMetric
+from scipy.spatial import cKDTree
+from dipy.tracking.streamline import Streamlines
+from dipy.tracking.streamline import transform_streamlines
+from dipy.tracking.streamline import values_from_volume
+import dipy.stats.analysis as dsa
+from actiDep.data.io import copy_from_dict
+import multiprocessing as mp
+from functools import partial
+import traceback
+
+def get_transform_center(transform):
+    """
+    Extrait le centre de rotation d'une transformation ANTs.
+    
+    Parameters
+    ----------
+    transform : SimpleITK Transform
+        Transformation ANTs chargée avec SimpleITK
+        
+    Returns
+    -------
+    ndarray
+        Centre de rotation (x, y, z)
+    """
+    try:
+        # Pour les transformations affines, ANTs stocke parfois le centre
+        if hasattr(transform, 'GetCenter'):
+            center = transform.GetCenter()
+            return np.array(center)
+        elif hasattr(transform, 'GetFixedParameters'):
+            # Le centre peut être dans les paramètres fixes
+            fixed_params = transform.GetFixedParameters()
+            if len(fixed_params) >= 3:
+                return np.array(fixed_params[:3])
+    except:
+        pass
+    
+    # Retourner l'origine par défaut
+    return np.array([0.0, 0.0, 0.0])
+def apply_transformation_with_center(points, transformation_matrix, center):
+    """
+    Applique une transformation affine avec un centre de rotation spécifique.
+    
+    La transformation se fait en 3 étapes :
+    1. Translater vers l'origine (soustraire le centre)
+    2. Appliquer la transformation complète
+    3. Translater de retour (ajouter le centre)
+    
+    Parameters
+    ----------
+    points : ndarray
+        Points à transformer, shape (N, 3)
+    transformation_matrix : ndarray  
+        Matrice de transformation 4x4
+    center : ndarray
+        Centre de rotation (x, y, z)
+        
+    Returns
+    -------
+    ndarray
+        Points transformés, shape (N, 3)
+    """
+    # Extraire la rotation et la translation
+    R = transformation_matrix[:3, :3]
+    t = transformation_matrix[:3, 3]
+    
+    # 1. Translater vers l'origine (centre -> origine)
+    points_centered = points - center
+    
+    # 2. Appliquer la rotation
+    points_rotated = (R @ points_centered.T).T
+    
+    # 3. Ajouter la translation et remettre le centre
+    # Formula: T * R * (p - c) + c + t
+    # où T est la rotation, R est déjà appliquée, c est le centre, t est la translation
+    points_final = points_rotated + center + t
+    
+    return points_final
+
+def get_image_center_from_nifti(nifti_path):
+    """
+    Calcule le centre d'une image NIfTI en coordonnées physiques.
+    
+    Parameters
+    ----------
+    nifti_path : str
+        Chemin vers le fichier NIfTI
+        
+    Returns
+    -------
+    ndarray
+        Centre de l'image en coordonnées physiques (x, y, z)
+    """
+    try:
+        img = nib.load(nifti_path)
+        affine = img.affine
+        shape = img.shape
+        
+        # Centre en coordonnées voxel (au milieu de l'image)
+        center_voxel = np.array([(shape[i] - 1) / 2.0 for i in range(3)])
+        
+        # Conversion en coordonnées physiques
+        center_voxel_homog = np.append(center_voxel, 1.0)
+        center_physical = (affine @ center_voxel_homog)[:3]
+        
+        return center_physical
+        
+    except Exception as e:
+        print(f"Error calculating image center: {e}")
+        return np.array([0.0, 0.0, 0.0])
+    
 def mcm_estimator(dwi, bval, bvec, mask, compart_map=None, n_comparts=None, **kwargs):
     """
     Calls the animaMCMEstimator to estimate the MCM coefficients from the DWI data.
@@ -395,6 +552,9 @@ def generate_scalar_map(vtk_file_path, reference_nifti_path, output_dir, output_
         mean_fa_map[non_zero_counts] = sum_fa_map[non_zero_counts] / \
             count_map[non_zero_counts]
 
+        #Flip the mean FA in z 
+        ref_affine[0,:]= -ref_affine[0,:]
+        ref_affine[1,:]= -ref_affine[1,:]
         # Sauvegarder la carte de FA moyenne
         output_mean_fa_path = os.path.join(
             output_dir, f"{output_file_prefix}_{name_mapping[array_name]}.nii.gz")
@@ -405,6 +565,509 @@ def generate_scalar_map(vtk_file_path, reference_nifti_path, output_dir, output_
 
     return output_nifti_paths
 
+def _interpolate_scalar_along_fiber(
+    original_fiber_coords_np, 
+    original_fiber_point_ids, 
+    polydata_point_data, 
+    scalar_array_name, 
+    target_proportion
+):
+    """Interpolates a scalar value along an original fiber at a target proportion of its length."""
+    scalar_array_vtk = polydata_point_data.GetArray(scalar_array_name)
+    if not scalar_array_vtk:
+        return None
+
+    num_orig_points = original_fiber_coords_np.shape[0]
+    if num_orig_points == 0:
+        return None
+    
+    num_components = scalar_array_vtk.GetNumberOfComponents()
+    
+    # Use vtk_to_numpy for faster bulk extraction
+    original_scalar_values = vtk_to_numpy(scalar_array_vtk)[original_fiber_point_ids]
+    
+    if num_orig_points == 1:
+        return original_scalar_values[0]
+
+    # Vectorized distance calculation
+    distances = np.linalg.norm(np.diff(original_fiber_coords_np, axis=0), axis=1)
+    cumulative_distances = np.concatenate([[0], np.cumsum(distances)])
+    total_length = cumulative_distances[-1]
+
+    if total_length == 0:
+        return original_scalar_values[0]
+
+    target_dist = np.clip(target_proportion * total_length, 0, total_length)
+    
+    # Use searchsorted for faster interpolation position finding
+    if target_dist <= cumulative_distances[0]:
+        return original_scalar_values[0]
+    elif target_dist >= cumulative_distances[-1]:
+        return original_scalar_values[-1]
+    
+    # Find interpolation segment
+    idx = np.searchsorted(cumulative_distances, target_dist) - 1
+    
+    # Linear interpolation between two points
+    t = (target_dist - cumulative_distances[idx]) / (cumulative_distances[idx + 1] - cumulative_distances[idx])
+    interpolated_val = original_scalar_values[idx] * (1 - t) + original_scalar_values[idx + 1] * t
+    
+    return interpolated_val
+
+
+def project_to_central_line_from_vtk(vtk_file_path, reference_nifti_path, output_path, num_points_central_line=100, transformation_matrix=None, transformation_center=None, rotate_z_180=False, center_vtk=True):
+    """
+    Clusters fibers into a single central line and projects all array values onto this line.
+
+    Parameters
+    ----------
+    vtk_file_path : str
+        Path to the input VTK PolyData file (.vtk).
+    reference_nifti_path : str
+        Path to the reference NIfTI image file.
+    output_path : str
+        Directory where the output VTK PolyData file will be saved.
+        The output file will be named "central_line.vtk".
+    num_points_central_line : int, optional
+        Number of points to define the central line, by default 100.
+    transformation_matrix : ndarray, optional
+        Transformation matrix to apply to the fibers. Shape (4, 4).
+    transformation_center : ndarray, optional
+        Center of rotation for the transformation. Shape (3,). If None, uses (0, 0, 0).
+    rotate_z_180 : bool, optional
+        Whether to apply a 180 degree rotation around the z-axis, by default False.
+    center_vtk : bool, optional
+        Whether to center the VTK points before applying the transformation, by default True.
+
+    Returns
+    -------
+    str or None
+        Path to the generated VTK file containing the central line, or None if an error occurs
+        or no fibers are found.
+    """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_vtk_filepath = os.path.join(output_path, "central_line.vtk")
+
+    # Read the VTK PolyData
+    reader = vtk.vtkPolyDataReader()
+    reader.SetFileName(vtk_file_path)
+    reader.Update()
+    polydata = reader.GetOutput()
+
+    if not polydata or polydata.GetNumberOfLines() == 0:
+        print(f"Error: No lines found in VTK file: {vtk_file_path}")
+        return None
+    
+    # Load transformation matrix if provided and ensure it's in the right format
+    if transformation_matrix is not None:
+        # Ensure transformation_matrix is a numpy array and 4x4
+        transformation_matrix = np.array(transformation_matrix)
+        print(f"Transformation matrix final:\n{transformation_matrix}")
+
+
+    # Extract point coordinates of each line
+    lines = polydata.GetLines()
+    lines_points = []
+    
+    # Initialize line cell traversal
+    lines.InitTraversal()
+    id_list = vtk.vtkIdList()
+    
+    # Collect all points first to calculate center if needed
+    all_line_points = []
+    while lines.GetNextCell(id_list):
+        line_points = []
+        for j in range(id_list.GetNumberOfIds()):
+            point_id = id_list.GetId(j)
+            point = polydata.GetPoint(point_id)
+            line_points.append(point)
+        all_line_points.append(np.array(line_points))
+
+    
+    # Process each line (transformation will be applied later to avoid double application)
+    for line_points_array in all_line_points:
+        lines_points.append(line_points_array)
+    
+    print(f"Number of lines found: {len(lines_points)}")
+    if len(lines_points) > 0:
+        print(f"First line has {len(lines_points[0])} points")
+        
+        # Additional debug: check if points are reasonable
+        all_points = np.vstack(lines_points)
+        overall_mean = np.mean(all_points, axis=0)
+        overall_std = np.std(all_points, axis=0)
+        print(f"Overall points stats - Mean: {overall_mean}")
+        print(f"Overall points stats - Std: {overall_std}")
+        
+        # Check if points seem to be in a reasonable coordinate system
+        if np.any(np.abs(overall_mean) > 1000) or np.any(overall_std > 1000):
+            print("Warning: Points seem to have very large coordinates, transformation might be incorrect")
+    
+    #Get stat of the lengths of the lines
+    line_lengths = np.array([len(line) for line in lines_points])
+    
+    print(f'Line lengths: min={line_lengths.min()}, max={line_lengths.max()}, mean={line_lengths.mean()}')
+
+    #Interpolate lines to a common number of points
+    interpolated_lines = []
+    for line in lines_points:
+        if len(line) < 2:
+            # Skip lines with less than 2 points
+            continue
+        # Create a linear space of points along the line
+        # Calculate cumulative distances along the line
+        distances = np.sqrt(np.sum(np.diff(line, axis=0)**2, axis=1))
+        cumulative_distances = np.insert(np.cumsum(distances), 0, 0)
+        total_length = cumulative_distances[-1]
+        
+        # Create target distances for interpolation
+        target_distances = np.linspace(0, total_length, num_points_central_line)
+        
+        # Interpolate each coordinate (x, y, z) separately
+        interpolated_line = np.zeros((num_points_central_line, 3))
+        for coord_idx in range(3):  # x, y, z coordinates
+            interp_func = interp1d(cumulative_distances, line[:, coord_idx], 
+                     kind='linear', bounds_error=False, 
+                     fill_value=(line[0, coord_idx], line[-1, coord_idx]))
+            interpolated_line[:, coord_idx] = interp_func(target_distances)
+        interpolated_lines.append(interpolated_line)
+    
+    # Create a new polydata with interpolated fibers (fixed number of points)
+    polydata_interpolated = vtk.vtkPolyData()
+    
+    # Create points for the interpolated lines
+    interpolated_points = vtk.vtkPoints()
+    interpolated_lines_vtk = vtk.vtkCellArray()
+    
+    point_counter = 0
+    for line in interpolated_lines:
+        # Add points for this line
+        line_point_ids = []
+        for point in line:
+            interpolated_points.InsertNextPoint(point[0], point[1], point[2])
+            line_point_ids.append(point_counter)
+            point_counter += 1
+        
+        # Create line connectivity
+        interpolated_lines_vtk.InsertNextCell(len(line_point_ids))
+        for point_id in line_point_ids:
+            interpolated_lines_vtk.InsertCellPoint(point_id)
+    
+    # Set points and lines to the new polydata
+    polydata_interpolated.SetPoints(interpolated_points)
+    polydata_interpolated.SetLines(interpolated_lines_vtk)
+    
+    # Interpolate scalar values for each point of the interpolated lines
+    polydata_point_data = polydata.GetPointData()
+    scalar_arrays = [polydata_point_data.GetArray(i).GetName() for i in range(polydata_point_data.GetNumberOfArrays()) if polydata_point_data.GetArray(i).GetName() != 'colors']
+
+    print(f"Scalar arrays found: {scalar_arrays}")
+    
+    # For each scalar array, create interpolated values
+    for array_name in scalar_arrays:
+        print(f"Interpolating scalar values for array: {array_name}")
+        array_vtk = polydata_point_data.GetArray(array_name)
+        num_components = array_vtk.GetNumberOfComponents()
+        
+        # Create array to hold all interpolated values
+        all_interpolated_values = []
+        
+        # Process each original line
+        lines = polydata.GetLines()
+        lines.InitTraversal()
+        id_list = vtk.vtkIdList()
+        line_idx = 0
+        
+        while lines.GetNextCell(id_list):
+            if line_idx >= len(interpolated_lines):
+                break
+                
+            # Get original fiber coordinates and point IDs
+            original_fiber_point_ids = [id_list.GetId(j) for j in range(id_list.GetNumberOfIds())]
+            original_fiber_coords_np = np.array([polydata.GetPoint(pid) for pid in original_fiber_point_ids])
+            
+            # Interpolate scalar values for each point of the interpolated line
+            for t in np.linspace(0, 1, num_points_central_line):
+                interpolated_val = _interpolate_scalar_along_fiber(
+                    original_fiber_coords_np, 
+                    original_fiber_point_ids, 
+                    polydata_point_data, 
+                    array_name, 
+                    target_proportion=t
+                )
+                if interpolated_val is not None:
+                    all_interpolated_values.append(interpolated_val)
+                else:
+                    # Fill with zeros if interpolation fails
+                    all_interpolated_values.append(np.zeros(num_components))
+            
+            line_idx += 1
+        
+        # Convert to numpy array and add to polydata
+        if all_interpolated_values:
+            interpolated_values_np = np.array(all_interpolated_values)
+            vtk_array = numpy_to_vtk(interpolated_values_np, deep=True)
+            vtk_array.SetName(array_name)
+            polydata_interpolated.GetPointData().AddArray(vtk_array)
+
+    qb = QuickBundles(
+        threshold=100.0,  # Adjust threshold as needed
+        metric=AveragePointwiseEuclideanMetric()
+    )
+
+    # Convert the interpolated lines to a Streamlines object
+    streamlines = Streamlines(interpolated_lines)
+    
+    # Perform quickbundling to get central lines
+    print("Performing quickbundling to get central lines...")
+    qb_result = qb.cluster(streamlines)
+    print(f"Quickbundling resulted in {len(qb_result)} clusters.")
+    if len(qb_result) == 0:
+        print("No central lines found after quickbundling.")
+        return None
+    
+    # Create a new polydata for the central line
+    central_line_polydata = vtk.vtkPolyData()
+    central_line_points = vtk.vtkPoints()
+    central_line_lines = vtk.vtkCellArray()
+    
+    point_counter = 0
+    for i, cluster in enumerate(qb_result):
+        # Get the centroid of the cluster (this is the representative streamline)
+        centroid = cluster.centroid
+        
+        # Add points for the centroid line
+        line_point_ids = []
+        for point in centroid:
+            # Ensure point coordinates are float type
+            central_line_points.InsertNextPoint(float(point[0]), float(point[1]), float(point[2]))
+            line_point_ids.append(point_counter)
+            point_counter += 1
+        
+        # Create a line connectivity for the centroid
+        central_line_lines.InsertNextCell(len(line_point_ids))
+        for point_id in line_point_ids:
+            central_line_lines.InsertCellPoint(point_id)
+    # Set points and lines to the new polydata
+    central_line_polydata.SetPoints(central_line_points)
+    central_line_polydata.SetLines(central_line_lines)
+
+    # Populate scalar arrays for central_line_polydata by averaging from member streamlines
+    for array_name in scalar_arrays:
+        print(f"Averaging scalar array '{array_name}' onto central line polydata.")
+        
+        # Scalars for interpolated streamlines (input to QuickBundles)
+        interpolated_vtk_array = polydata_interpolated.GetPointData().GetArray(array_name)
+        if not interpolated_vtk_array:
+            print(f"  Skipping array {array_name}, not found in polydata_interpolated.")
+            continue
+        
+        interpolated_np_array = vtk_to_numpy(interpolated_vtk_array)
+        num_components = interpolated_vtk_array.GetNumberOfComponents()
+        total_central_points = central_line_points.GetNumberOfPoints()
+        
+        sum_values = np.zeros((total_central_points, num_components), dtype=np.float64)
+        count_values = np.zeros((total_central_points, 1), dtype=np.float64) # Use float for count to avoid type issues in division if sum is float
+
+        current_centroid_point_offset = 0
+        for cluster_idx, cluster in enumerate(qb_result):
+            centroid_length = len(cluster.centroid)
+            
+            for i in range(centroid_length): # For each point on this centroid
+                global_centroid_point_idx = current_centroid_point_offset + i
+                
+                for member_streamline_idx_in_interpolated_list in cluster.indices:
+                    # member_streamline_idx_in_interpolated_list is an index into `interpolated_lines`
+                    # Calculate the global point index for this member's point in `interpolated_np_array`
+                    # Each interpolated streamline has `num_points_central_line` points.
+                    point_idx_on_member_streamline = (member_streamline_idx_in_interpolated_list * num_points_central_line) + i
+                    
+                    if point_idx_on_member_streamline < interpolated_np_array.shape[0]:
+                        value_from_member = interpolated_np_array[point_idx_on_member_streamline]
+                        sum_values[global_centroid_point_idx] += value_from_member
+                        count_values[global_centroid_point_idx] += 1
+            
+            current_centroid_point_offset += centroid_length
+
+        central_line_final_data = np.zeros((total_central_points, num_components), dtype=np.float32)
+        # Avoid division by zero: only divide where count is non-zero
+        valid_counts_mask = count_values > 0 # Shape (total_central_points, 1)
+        
+        # Create a 1D boolean mask for selecting rows
+        row_mask = valid_counts_mask[:, 0] # Shape (total_central_points,)
+
+        # Perform division only for rows with valid counts
+        if np.any(row_mask):
+            selected_sum_values = sum_values[row_mask]     # Shape (N, num_components)
+            selected_count_values = count_values[row_mask] # Shape (N, 1)
+            
+            division_result = selected_sum_values / selected_count_values # Shape (N, num_components)
+            
+            central_line_final_data[row_mask] = division_result.astype(np.float32)
+                
+        vtk_central_line_array = numpy_to_vtk(central_line_final_data, deep=True)
+        vtk_central_line_array.SetName(array_name)
+        central_line_polydata.GetPointData().AddArray(vtk_central_line_array)
+
+    # --- DEBUG: Save original streamlines with centroid-mapped metrics using cKDTree ---
+    debug_polydata = vtk.vtkPolyData()
+    debug_points = vtk.vtkPoints()
+    debug_lines = vtk.vtkCellArray()
+    debug_point_counter = 0
+    debug_metric_arrays = {array_name: [] for array_name in scalar_arrays}
+
+    # Build a dict of centroid metrics for each cluster and array
+    centroid_metrics_per_cluster = {}
+    for array_name in scalar_arrays:
+        centroid_metrics_per_cluster[array_name] = []
+        arr = None
+        for arr_idx in range(central_line_polydata.GetPointData().GetNumberOfArrays()):
+            arr_candidate = central_line_polydata.GetPointData().GetArray(arr_idx)
+            if arr_candidate.GetName() == array_name:
+                arr = arr_candidate
+                break
+        if arr is not None: # arr is from central_line_polydata, which is now populated
+            arr_np = vtk_to_numpy(arr)
+            # Split arr_np into clusters (since all clusters are concatenated)
+            offset = 0
+            for cluster in qb_result:
+                npts = len(cluster.centroid)
+                centroid_metrics_per_cluster[array_name].append(arr_np[offset:offset+npts])
+                offset += npts
+        else: # Fallback if array was not found in central_line_polydata (should not happen)
+            for cluster in qb_result:
+                # Get num_components from the original input polydata as a last resort
+                original_input_array = polydata.GetPointData().GetArray(array_name)
+                num_components = original_input_array.GetNumberOfComponents() if original_input_array else 1
+                centroid_metrics_per_cluster[array_name].append(
+                    np.zeros((len(cluster.centroid), num_components), dtype=np.float32)
+                )
+
+    for cluster_idx, cluster in enumerate(qb_result):
+        centroid = cluster.centroid  # (num_points_central_line, 3)
+        centroid_tree = cKDTree(centroid)
+        # Get centroid metrics for this cluster
+        centroid_metrics = {array_name: centroid_metrics_per_cluster[array_name][cluster_idx] for array_name in scalar_arrays}
+        for member_idx in cluster.indices:
+            orig_line = lines_points[member_idx]
+            orig_len = len(orig_line)
+            if orig_len < 1:
+                continue
+            # Associe chaque point au point du centroïde le plus proche
+            dists, idxs = centroid_tree.query(orig_line)
+            # Add points and lines
+            line_point_ids = []
+            for pt_idx, pt in enumerate(orig_line):
+                debug_points.InsertNextPoint(float(pt[0]), float(pt[1]), float(pt[2]))
+                line_point_ids.append(debug_point_counter)
+                debug_point_counter += 1
+                for array_name in scalar_arrays:
+                    debug_metric_arrays[array_name].append(centroid_metrics[array_name][idxs[pt_idx]])
+            debug_lines.InsertNextCell(len(line_point_ids))
+            for pid in line_point_ids:
+                debug_lines.InsertCellPoint(pid)
+    debug_polydata.SetPoints(debug_points)
+    debug_polydata.SetLines(debug_lines)
+    for array_name in scalar_arrays:
+        arr_np = np.array(debug_metric_arrays[array_name], dtype=np.float32)
+        arr = numpy_to_vtk(arr_np, deep=True)
+        arr.SetName(array_name)
+        debug_polydata.GetPointData().AddArray(arr)
+
+    if reference_nifti_path:
+        # Load the reference NIfTI image to get the affine transformation
+        try:
+            ref_image = nib.load(reference_nifti_path)
+            ref_affine = ref_image.affine
+            print(f"Reference NIfTI affine:\n{ref_affine}")
+        except Exception as e:
+            print(f"Error loading reference NIfTI file: {reference_nifti_path}")
+            print(e)
+            ref_affine = np.eye(4)
+    
+    # Apply transformation matrix to the polydata if provided
+    if transformation_matrix is not None:
+        print("Applying transformation matrix to polydata...")
+        
+        # Utiliser le centre de transformation si fourni, sinon calculer le centre de l'image de référence
+        if transformation_center is None:
+            if reference_nifti_path:
+                transformation_center = get_image_center_from_nifti(reference_nifti_path)
+                print(f"Using reference image center: {transformation_center}")
+            else:
+                transformation_center = np.array([0.0, 0.0, 0.0])
+                print("No reference image, using origin as center")
+        else:
+            print(f"Using provided transformation center: {transformation_center}")
+        
+        # Debug: afficher quelques points avant transformation
+        if debug_polydata.GetNumberOfPoints() > 0:
+            sample_points_before = []
+            for i in range(min(5, debug_polydata.GetNumberOfPoints())):
+                pt = debug_polydata.GetPoint(i)
+                sample_points_before.append(pt)
+            print(f"Sample points before transformation: {sample_points_before}")
+        
+        # Appliquer la transformation manuellement avec le centre correct
+        # Extraire tous les points des polydata
+        debug_points_array = []
+        for i in range(debug_polydata.GetNumberOfPoints()):
+            pt = debug_polydata.GetPoint(i)
+            debug_points_array.append([pt[0], pt[1], pt[2]])
+        debug_points_array = np.array(debug_points_array)
+        
+        # Appliquer la transformation avec le centre
+        transformed_debug_points = apply_transformation_with_center(
+            debug_points_array, transformation_matrix, transformation_center
+        )
+        
+        # Mettre à jour les points dans debug_polydata
+        debug_points_vtk = vtk.vtkPoints()
+        for i, pt in enumerate(transformed_debug_points):
+            debug_points_vtk.InsertNextPoint(float(pt[0]), float(pt[1]), float(pt[2]))
+        debug_polydata.SetPoints(debug_points_vtk)
+        
+        # Faire de même pour central_line_polydata
+        central_points_array = []
+        for i in range(central_line_polydata.GetNumberOfPoints()):
+            pt = central_line_polydata.GetPoint(i)
+            central_points_array.append([pt[0], pt[1], pt[2]])
+        central_points_array = np.array(central_points_array)
+        
+        transformed_central_points = apply_transformation_with_center(
+            central_points_array, transformation_matrix, transformation_center
+        )
+        
+        central_points_vtk = vtk.vtkPoints()
+        for i, pt in enumerate(transformed_central_points):
+            central_points_vtk.InsertNextPoint(float(pt[0]), float(pt[1]), float(pt[2]))
+        central_line_polydata.SetPoints(central_points_vtk)
+        
+        # Debug: afficher quelques points après transformation
+        if debug_polydata.GetNumberOfPoints() > 0:
+            sample_points_after = []
+            for i in range(min(5, debug_polydata.GetNumberOfPoints())):
+                pt = debug_polydata.GetPoint(i)
+                sample_points_after.append(pt)
+            print(f"Sample points after transformation: {sample_points_after}")
+    else:
+        print("No transformation matrix provided, skipping transformation.")
+    debug_vtk_path = output_path.replace('desc-centroid','desc-debug')
+    writer_debug = vtk.vtkPolyDataWriter()
+    writer_debug.SetFileName(debug_vtk_path)
+    writer_debug.SetInputData(debug_polydata)
+    writer_debug.Write()
+    print(f"Debug: Original streamlines with centroid-mapped metrics saved to: {debug_vtk_path}")
+
+    # Save the central line polydata to a VTK file
+    writer = vtk.vtkPolyDataWriter()
+    writer.SetFileName(output_path)
+    writer.SetInputData(central_line_polydata)
+    writer.Write()
+    print(f"Central line saved to: {output_path}")
+    
+    return output_path
+    
 
 def add_mcm_to_tracts(tracts, mcm_file, reference=None, **kwargs):
     """
@@ -454,7 +1117,7 @@ def add_mcm_to_tracts(tracts, mcm_file, reference=None, **kwargs):
 
         cmd = [
             "flip_tractogram", tracts.path, converted_input_vtk_path, "--reference",
-            reference.path
+            reference.path#, '-ft','lps2ras'
         ]
         print("Converting tracts to VTK format...")
         print("Command:", ' '.join(cmd))
@@ -466,7 +1129,7 @@ def add_mcm_to_tracts(tracts, mcm_file, reference=None, **kwargs):
         ]
         print("Flipping VTK tracts...")
         print("Command:", ' '.join(cmd))
-        call(cmd)
+        # call(cmd)
 
 
     # Output filename for animaTracksMCMPropertiesExtraction, relative to its execution directory
@@ -570,35 +1233,760 @@ def add_mcm_to_tracts(tracts, mcm_file, reference=None, **kwargs):
     pprint(final_results)
     return final_results
 
+def convert_transform_matrix_to_nibabel(transform_matrix):
+    """
+    Convert a transformation matrix from SimpleITK to nibabel format.
+    SimpleITK uses LPS (Left-Posterior-Superior) coordinate system,
+    while nibabel uses RAS (Right-Anterior-Superior).
+    """
+    # Create the coordinate system conversion matrices
+    lps_to_ras = np.array([
+        [-1, 0, 0, 0],
+        [0, -1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ])
+    
+    # Convert the matrix
+    # First convert from LPS to RAS, then apply inverse for tract coordinates
+    ras_matrix = lps_to_ras @ transform_matrix @ np.linalg.inv(lps_to_ras)
+    
+    return np.linalg.inv(ras_matrix)
+
+def invert_affine_transformation(transformation_matrix):
+    """
+    Inverse une matrice de transformation affine 4x4 de manière correcte.
+    
+    Pour une matrice de la forme:
+    [R t]
+    [0 1]
+    
+    L'inverse est:
+    [R^-1  -R^-1*t]
+    [0     1      ]
+    
+    Parameters
+    ----------
+    transformation_matrix : ndarray
+        Matrice de transformation affine 4x4
+        
+    Returns
+    -------
+    ndarray
+        Matrice inverse 4x4
+    """
+    # Extraire la rotation et la translation
+    R = transformation_matrix[:3, :3]
+    t = transformation_matrix[:3, 3]
+    
+    # Calculer l'inverse de la rotation
+    R_inv = np.linalg.inv(R)
+    
+    # Calculer l'inverse de la translation
+    t_inv = -R_inv @ t
+    
+    # Construire la matrice inverse
+    inverse_matrix = np.eye(4)
+    inverse_matrix[:3, :3] = R_inv
+    inverse_matrix[:3, 3] = t_inv
+    
+    return inverse_matrix
+
+def process_subject(subject_id, dataset_path, output_base_path, atlas_dir):
+    """
+    Process a single subject - function for multiprocessing
+    
+    Parameters
+    ----------
+    subject_id : str
+        Subject ID to process
+    dataset_path : str
+        Path to the ActiDep dataset
+    output_base_path : str
+        Base output path for results
+    atlas_dir : str
+        Path to the atlas directory
+    """
+    try:
+        dataset = Actidep(dataset_path)
+        subject = dataset.get_subject(subject_id)
+        print(f"\nProcessing subject: {subject_id}")
+        
+        # Get all MCM VTK files for this subject to identify available bundles
+        all_mcm_vtk_files = subject.get(
+            desc='cleaned',
+            model='MCM',
+            suffix='tracto',
+            extension='vtk'
+        )
+        
+        if not all_mcm_vtk_files:
+            print(f"  No MCM VTK files found for subject {subject_id}")
+            return f"No MCM VTK files found for subject {subject_id}"
+        
+        # Extract unique bundle names from the files
+        bundles = set()
+        for file in all_mcm_vtk_files:
+            if hasattr(file, 'entities') and 'bundle' in file.entities:
+                bundles.add(file.entities['bundle'])
+        
+        if not bundles:
+            print(f"  No bundle information found for subject {subject_id}")
+            return f"No bundle information found for subject {subject_id}"
+        
+        # bundles = [b for b in bundles if any(x in b for x in ['CSTright'])]
+        print(f"  Found bundles: {list(bundles)}")
+
+
+        
+        # Get the FA reference file for this subject (same for all bundles)
+        fa_files = subject.get(
+            metric='FA',
+            model='DTI',
+            suffix='dwi',
+            extension='nii.gz'
+        )
+        
+        if not fa_files:
+            print(f"  No FA file found for subject {subject_id}")
+            return f"No FA file found for subject {subject_id}"
+            
+        fa_nii = fa_files[0].path
+        print(f"  FA reference: {fa_nii}")
+
+        transformation_matrix = subject.get(**{'pipeline':'tractometry', 
+                                                   'from':'subject',
+                                                   'to':'HCP',
+                                                   'suffix':'xfm',
+                                                   'extension':'mat'})
+        
+        #Load the transformation matrix
+        if len(transformation_matrix)==1:
+            transformation_matrix_path = transformation_matrix[0].path
+            print(f"  Transformation matrix: {transformation_matrix_path}")
+            try:
+                # Chargement avec SimpleITK et reconstruction correcte de la matrice
+                transform = sitk.ReadTransform(transformation_matrix_path)
+                
+                # Récupérer le centre de rotation de la transformation
+                transform_center = get_transform_center(transform)
+                print(f"  Transform center: {transform_center}")
+                
+                transformation_matrix = np.eye(4)
+                
+                # ANTs stocke les paramètres dans un ordre spécifique
+                # Pour une transformation affine, les paramètres sont :
+                # [Rxx, Rxy, Rxz, Ryx, Ryy, Ryz, Rzx, Rzy, Rzz, Tx, Ty, Tz]
+                params = transform.GetParameters()
+                print(f"  Transform parameters: {params}")
+                print(f"  Number of parameters: {len(params)}")
+                
+                if len(params) >= 12:  # Transformation affine
+                    # Reconstruction de la matrice de rotation (row-major order)
+                    rotation = np.array(params[:9]).reshape(3, 3)
+                    translation = np.array(params[9:12])
+                    
+                    print(f"  Rotation matrix:\n{rotation}")
+                    print(f"  Translation vector: {translation}")
+                    
+                    # Construction de la matrice de transformation
+                    transformation_matrix[:3, :3] = rotation
+                    transformation_matrix[:3, 3] = translation
+                    
+                    print(f"  Transformation matrix (ANTs convention, HCP->subject):\n{transformation_matrix}")
+                    
+                    # Inversion pour obtenir subject->HCP
+                    transformation_matrix = invert_affine_transformation(transformation_matrix)
+                    print(f"  Inverted transformation matrix (subject->HCP):\n{transformation_matrix}")
+                    
+                    # Stocker le centre pour utilisation ultérieure
+                    # Utiliser le centre de l'image de référence si le centre de la transformation n'est pas disponible
+                    if np.allclose(transform_center, [0, 0, 0]):
+                        print("  Transform center is at origin, will use reference image center instead")
+                        transformation_center = None  # Sera calculé plus tard avec l'image de référence
+                    else:
+                        transformation_center = transform_center
+                    
+                else:
+                    print(f"  Unexpected number of parameters: {len(params)}")
+                    transformation_matrix = np.eye(4)
+                
+
+                
+            except ImportError:
+                print("  SimpleITK is not available, using numpy load instead")
+                transformation_matrix = np.loadtxt(transformation_matrix_path)
+
+
+            except Exception as e:
+                print(f"  Erreur lors du chargement de la matrice de transformation: {e}")
+                print("  Utilisation d'une matrice identité à la place")
+                transformation_matrix = np.eye(4)
+                sys.exit(1)
+
+        else:
+            print("  Aucune matrice de transformation trouvée, utilisation d'une matrice identité")
+            transformation_matrix = np.eye(4)
+            transformation_center = np.array([0.0, 0.0, 0.0])
+            transformation_matrix = np.eye(4)
+        
+        # Process each bundle
+        # bundles = [b for b in bundles if b == 'CSTright']  # Filter for ATRright only
+        bundle_results = []
+        for bundle in bundles:
+            print(f"    Processing bundle: {bundle}")
+            
+            # Get the MCM VTK file for this specific bundle
+            mcm_vtk_files = subject.get(
+                bundle=bundle,
+                desc='cleaned',
+                model='MCM',
+                suffix='tracto',
+                extension='vtk'
+            )
+            
+            if not mcm_vtk_files:
+                print(f"      No MCM VTK file found for bundle {bundle}")
+                continue
+            
+            mcm_vtk = mcm_vtk_files[0].path
+            print(f"      MCM VTK: {mcm_vtk}")
+            
+            # Create output directory for this subject and bundle
+            # output_path = f'{output_base_path}/sub-{subject_id}/{bundle}'
+            output_path=f'/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/derivatives/tractometry/sub-{subject_id}/tracto/sub-{subject_id}_bundle-{bundle}_desc-centroid_model-MCM_tracto.vtk'            
+            # Generate clustered points version
+            # cluster_output_path = output_path.replace('_desc-centroid_', '_desc-clustered_')
+            # cluster_vtk_path = cluster_points_by_distance_from_vtk(
+            #     vtk_file_path=mcm_vtk,
+            #     output_path=cluster_output_path,
+            #     distance_threshold=5.0,
+            #     min_cluster_size=3,
+            #     transformation_matrix=transformation_matrix,
+            #     transformation_center=transformation_center
+            # )
+            
+            # if cluster_vtk_path:
+            #     print(f"      ✓ Clustered points VTK saved to: {cluster_vtk_path}")
+            #     bundle_results.append(f"✓ {bundle} (clustered)")
+            
+            # Generate central line
+            output_vtk_path = project_to_central_line_from_vtk(
+                vtk_file_path=mcm_vtk,
+                reference_nifti_path=fa_nii,
+                output_path=output_path,
+                num_points_central_line=10,
+                transformation_matrix=transformation_matrix,
+                transformation_center=transformation_center
+            )
+
+            if output_vtk_path:
+                print(f"      ✓ Central line VTK saved to: {output_vtk_path}")
+                bundle_results.append(f"✓ {bundle}")
+            else:
+                print(f"      ✗ Failed to generate central line VTK for bundle {bundle}")
+                bundle_results.append(f"✗ {bundle}")
+
+            
+        
+        return f"Subject {subject_id}: {', '.join(bundle_results)}"
+        
+    except Exception as e:
+        error_msg = f"Error processing subject {subject_id}: {str(e)}"
+        full_traceback = traceback.format_exc()
+        print(f"  ✗ {error_msg}")
+        print(f"  Full traceback:\n{full_traceback}")
+        return error_msg
+
+def extract_vtk_to_csv(vtk_file_paths, output_base_path, bundle_names=None, reference_vtk_file_paths=None):
+    """
+    Extracts scalar values from multiple VTK files and saves them as CSV files with bundle names as columns.
+
+    Parameters
+    ----------
+    vtk_file_paths : list
+        List of paths to the input VTK files.
+    output_base_path : str
+        Base path for saving the output CSV files.
+    bundle_names : list, optional
+        List of bundle names corresponding to each VTK file. If None, uses file basenames.
+    reference_vtk_file_paths : list, optional
+        List of paths to reference VTK files to match orientation of streamlines.
+        Should have the same length as vtk_file_paths if provided.
+    
+    Returns
+    -------
+    dict
+        Dictionary mapping array names to their corresponding CSV file paths.
+    """
+    bundle_name_mapping = get_HCP_bundle_names()
+    if bundle_names is None:
+        bundle_names = bundle_name_mapping.keys()
+        #Order by appearance in vtk_file_paths
+        bundle_names = [x.split('bundle-')[-1].split('_')[0] for x in vtk_file_paths]
+    
+    # if len(vtk_file_paths) != len(bundle_names):
+    #     raise ValueError("Number of VTK files must match number of bundle names")
+    
+    # # Valider les fichiers de référence si fournis
+    # if reference_vtk_file_paths is not None:
+    #     if len(reference_vtk_file_paths) != len(vtk_file_paths):
+    #         raise ValueError("Number of reference VTK files must match number of VTK files")
+    
+    name_mapping = {
+        "Fractional anisotropy": "FA",
+        "Mean diffusivity": "MD",
+        "Parallel diffusivity": "AD",
+        "Perpendicular diffusivity": "RD",
+        "Isotropic restricted water fraction": "IRF",
+        "Free water fraction": "IFW"
+    }
+    
+    # Dictionary to store data for each metric
+    metric_data = {}
+    csv_files = {}
+    
+    # Process each VTK file
+    for idx, (vtk_path, bundle_name) in enumerate(zip(vtk_file_paths, bundle_names)):
+        if not os.path.exists(vtk_path):
+            print(f"Warning: VTK file does not exist: {vtk_path}")
+            continue
+        
+        # Déterminer si l'orientation doit être inversée
+        should_flip = False
+        if reference_vtk_file_paths is not None:
+            reference_path = [f for f in reference_vtk_file_paths if bundle_name in f][0]
+            print(f"Reference path for bundle {bundle_name}: {reference_path}")
+            print(f"Reference VTK file paths: {vtk_path}")
+            if os.path.exists(reference_path):
+                should_flip = determine_streamline_orientation(vtk_path, reference_path)
+                if should_flip:
+                    print(f"Flipping orientation for bundle {bundle_name}")
+            else:
+                print(f"Warning: Reference VTK file does not exist: {reference_path}")
+            
+        # Read the VTK file
+        reader = vtk.vtkPolyDataReader()
+        reader.SetFileName(vtk_path)
+        reader.Update()
+        
+        polydata = reader.GetOutput()
+        point_data = polydata.GetPointData()
+        
+        # Extract arrays from this VTK file
+        for i in range(point_data.GetNumberOfArrays()):
+            array = point_data.GetArray(i)
+            array_name = array.GetName()
+            
+            if array_name not in name_mapping:
+                continue
+                
+            metric_name = name_mapping[array_name]
+            
+            # Convert VTK array to numpy array
+            np_array = vtk_to_numpy(array)
+            
+            # Appliquer le flip si nécessaire
+            if should_flip:
+                np_array = flip_array_data(np_array)
+            
+            # Initialize metric data dictionary if needed
+            if metric_name not in metric_data:
+                metric_data[metric_name] = {}
+            
+            # Store data with bundle name as key
+            metric_data[metric_name][bundle_name] = np_array
+    
+    # Create CSV files for each metric
+    os.makedirs(output_base_path, exist_ok=True)
+    
+    for metric_name, bundle_data in metric_data.items():
+        # Create DataFrame with bundle names as columns
+        df = pd.DataFrame(bundle_data)
+        
+        csv_file_path = os.path.join(output_base_path, f"{metric_name}.csv")
+        df.to_csv(csv_file_path, index=False,sep=';')
+        
+        csv_files[metric_name] = csv_file_path
+        print(f"Saved {metric_name} data to: {csv_file_path}")
+    
+    return csv_files
+
+def determine_streamline_orientation(vtk_file_path, reference_vtk_file_path=None):
+    """
+    Détermine l'orientation d'une streamline par rapport à une référence.
+    
+    Parameters
+    ----------
+    vtk_file_path : str
+        Chemin vers le fichier VTK à analyser
+    reference_vtk_file_path : str, optional
+        Chemin vers le fichier VTK de référence
+        
+    Returns
+    -------
+    bool
+        True si l'orientation doit être inversée, False sinon
+    """
+    if reference_vtk_file_path is None:
+        return False
+    
+    # Si c'est le même fichier, pas besoin de retourner
+    if os.path.abspath(vtk_file_path) == os.path.abspath(reference_vtk_file_path):
+        return False
+    
+    try:
+        # Charger le fichier VTK principal
+        reader = vtk.vtkPolyDataReader()
+        reader.SetFileName(vtk_file_path)
+        reader.Update()
+        polydata = reader.GetOutput()
+        
+        # Charger le fichier VTK de référence
+        ref_reader = vtk.vtkPolyDataReader()
+        ref_reader.SetFileName(reference_vtk_file_path)
+        ref_reader.Update()
+        ref_polydata = ref_reader.GetOutput()
+        
+        if polydata.GetNumberOfPoints() == 0 or ref_polydata.GetNumberOfPoints() == 0:
+            return False
+        
+        # Extraire les points de la première ligne de chaque fichier
+        lines = polydata.GetLines()
+        lines.InitTraversal()
+        id_list = vtk.vtkIdList()
+        
+        if not lines.GetNextCell(id_list) or id_list.GetNumberOfIds() < 2:
+            return False
+            
+        # Premier et dernier point du fichier principal
+        first_point = np.array(polydata.GetPoint(id_list.GetId(0)))
+        last_point = np.array(polydata.GetPoint(id_list.GetId(id_list.GetNumberOfIds() - 1)))
+        
+        # Extraire les points de la première ligne du fichier de référence
+        ref_lines = ref_polydata.GetLines()
+        ref_lines.InitTraversal()
+        ref_id_list = vtk.vtkIdList();
+        
+        if not ref_lines.GetNextCell(ref_id_list) or ref_id_list.GetNumberOfIds() < 2:
+            return False
+            
+        # Premier et dernier point du fichier de référence
+        ref_first_point = np.array(ref_polydata.GetPoint(ref_id_list.GetId(0)))
+        ref_last_point = np.array(ref_polydata.GetPoint(ref_id_list.GetId(ref_id_list.GetNumberOfIds() - 1)))
+        
+        # Calculer les distances entre les extrémités
+        dist_first_to_first = np.linalg.norm(first_point - ref_first_point)
+        dist_first_to_last = np.linalg.norm(first_point - ref_last_point)
+        dist_last_to_first = np.linalg.norm(last_point - ref_first_point)
+        dist_last_to_last = np.linalg.norm(last_point - ref_last_point)
+        
+        # Déterminer l'orientation
+        # Si first->first + last->last < first->last + last->first, alors même orientation
+        same_orientation_score = dist_first_to_first + dist_last_to_last
+        opposite_orientation_score = dist_first_to_last + dist_last_to_first
+        
+        # Retourner True si l'orientation doit être inversée
+        return opposite_orientation_score < same_orientation_score
+        
+    except Exception as e:
+        print(f"Error determining orientation for {vtk_file_path}: {e}")
+        return False
+
+def flip_array_data(data_array):
+    """
+    Inverse l'ordre des données dans un array.
+    
+    Parameters
+    ----------
+    data_array : ndarray
+        Array de données à inverser
+        
+    Returns
+    -------
+    ndarray
+        Array avec l'ordre inversé
+    """
+    return np.flip(data_array, axis=0)
+
+def cluster_points_by_distance_from_vtk(vtk_file_path, output_path, distance_threshold=5.0, min_cluster_size=3, transformation_matrix=None, transformation_center=None):
+    """
+    Clusters points from different streamlines based on spatial proximity and creates
+    a PolyData with cluster indices.
+
+    Parameters
+    ----------
+    vtk_file_path : str
+        Path to the input VTK PolyData file (.vtk).
+    output_path : str
+        Path where the output VTK PolyData file will be saved.
+    distance_threshold : float, optional
+        Maximum distance for points to be considered neighbors, by default 5.0.
+    min_cluster_size : int, optional
+        Minimum number of points required to form a cluster, by default 3.
+    transformation_matrix : ndarray, optional
+        Transformation matrix to apply to the points. Shape (4, 4).
+    transformation_center : ndarray, optional
+        Center of rotation for the transformation. Shape (3,). If None, uses (0, 0, 0).
+
+    Returns
+    -------
+    str or None
+        Path to the generated VTK file containing clustered points, or None if an error occurs.
+    """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # Read the VTK PolyData
+    reader = vtk.vtkPolyDataReader()
+    reader.SetFileName(vtk_file_path)
+    reader.Update()
+    polydata = reader.GetOutput()
+
+    if not polydata or polydata.GetNumberOfLines() == 0:
+        print(f"Error: No lines found in VTK file: {vtk_file_path}")
+        return None
+
+    # Extract all points and their streamline membership
+    all_points = []
+    point_to_streamline = []
+    point_to_local_index = []
+    
+    lines = polydata.GetLines()
+    lines.InitTraversal()
+    id_list = vtk.vtkIdList()
+    streamline_idx = 0
+    
+    while lines.GetNextCell(id_list):
+        for local_idx in range(id_list.GetNumberOfIds()):
+            point_id = id_list.GetId(local_idx)
+            point = polydata.GetPoint(point_id)
+            all_points.append(point)
+            point_to_streamline.append(streamline_idx)
+            point_to_local_index.append(local_idx)
+        streamline_idx += 1
+
+    all_points = np.array(all_points)
+    point_to_streamline = np.array(point_to_streamline)
+    point_to_local_index = np.array(point_to_local_index)
+    
+    print(f"Total points extracted: {len(all_points)}")
+    print(f"Number of streamlines: {streamline_idx}")
+
+    # Apply transformation if provided
+    if transformation_matrix is not None:
+        if transformation_center is None:
+            transformation_center = np.array([0.0, 0.0, 0.0])
+        
+        print("Applying transformation to points...")
+        all_points = apply_transformation_with_center(
+            all_points, transformation_matrix, transformation_center
+        )
+
+    # Build cKDTree for efficient neighbor search
+    print("Building spatial index...")
+    tree = cKDTree(all_points)
+    
+    # Find clusters using distance-based grouping
+    print(f"Finding clusters with distance threshold: {distance_threshold}")
+    visited = np.zeros(len(all_points), dtype=bool)
+    cluster_labels = np.full(len(all_points), -1, dtype=int)
+    cluster_id = 0
+    
+    for point_idx in range(len(all_points)):
+        if visited[point_idx]:
+            continue
+            
+        # Find all neighbors within distance threshold
+        neighbor_indices = tree.query_ball_point(all_points[point_idx], r=distance_threshold)
+        
+        if len(neighbor_indices) >= min_cluster_size:
+            # Create new cluster
+            for neighbor_idx in neighbor_indices:
+                if not visited[neighbor_idx]:
+                    visited[neighbor_idx] = True
+                    cluster_labels[neighbor_idx] = cluster_id
+            cluster_id += 1
+        else:
+            # Mark as noise/outlier
+            visited[point_idx] = True
+            cluster_labels[point_idx] = -1
+
+    print(f"Found {cluster_id} clusters")
+    
+    # Count points per cluster
+    unique_clusters, cluster_counts = np.unique(cluster_labels[cluster_labels >= 0], return_counts=True)
+    print(f"Cluster sizes: {dict(zip(unique_clusters, cluster_counts))}")
+
+    # Create new PolyData with clustered points
+    clustered_polydata = vtk.vtkPolyData()
+    clustered_points = vtk.vtkPoints()
+    
+    # Add all points to the new polydata
+    for point in all_points:
+        clustered_points.InsertNextPoint(float(point[0]), float(point[1]), float(point[2]))
+    
+    clustered_polydata.SetPoints(clustered_points)
+
+    # Create vertices for visualization (each point as a vertex)
+    vertices = vtk.vtkCellArray()
+    for i in range(len(all_points)):
+        vertices.InsertNextCell(1)
+        vertices.InsertCellPoint(i)
+    clustered_polydata.SetVerts(vertices)
+
+    # Add cluster indices as point data
+    cluster_array = numpy_to_vtk(cluster_labels.astype(np.int32), deep=True)
+    cluster_array.SetName("cluster_indices")
+    clustered_polydata.GetPointData().AddArray(cluster_array)
+    clustered_polydata.GetPointData().SetActiveScalars("cluster_indices")
+
+    # Add streamline membership information
+    streamline_array = numpy_to_vtk(point_to_streamline.astype(np.int32), deep=True)
+    streamline_array.SetName("streamline_id")
+    clustered_polydata.GetPointData().AddArray(streamline_array)
+
+    # Add local index within streamline
+    local_index_array = numpy_to_vtk(point_to_local_index.astype(np.int32), deep=True)
+    local_index_array.SetName("local_index")
+    clustered_polydata.GetPointData().AddArray(local_index_array)
+
+    # Copy scalar arrays from original polydata if they exist
+    original_point_data = polydata.GetPointData()
+    for i in range(original_point_data.GetNumberOfArrays()):
+        original_array = original_point_data.GetArray(i)
+        array_name = original_array.GetName()
+        
+        if array_name and array_name != 'colors':
+            print(f"Copying scalar array: {array_name}")
+            
+            # Create new array for clustered points
+            new_array_data = []
+            
+            # For each point in all_points, find corresponding original point
+            lines = polydata.GetLines()
+            lines.InitTraversal()
+            id_list = vtk.vtkIdList()
+            current_streamline = 0
+            
+            while lines.GetNextCell(id_list):
+                for local_idx in range(id_list.GetNumberOfIds()):
+                    original_point_id = id_list.GetId(local_idx)
+                    
+                    # Get the scalar value for this original point
+                    if original_array.GetNumberOfComponents() == 1:
+                        value = original_array.GetValue(original_point_id)
+                        new_array_data.append(value)
+                    else:
+                        value_tuple = original_array.GetTuple(original_point_id)
+                        new_array_data.append(list(value_tuple))
+                
+                current_streamline += 1
+            
+            # Convert to numpy and add to polydata
+            new_array_np = np.array(new_array_data, dtype=np.float32)
+            new_vtk_array = numpy_to_vtk(new_array_np, deep=True)
+            new_vtk_array.SetName(array_name)
+            clustered_polydata.GetPointData().AddArray(new_vtk_array)
+
+    # Save the clustered polydata to VTK file
+    writer = vtk.vtkPolyDataWriter()
+    writer.SetFileName(output_path)
+    writer.SetInputData(clustered_polydata)
+    writer.Write()
+    
+    print(f"Clustered points saved to: {output_path}")
+    
+    return output_path
 
 if __name__ == "__main__":
     config, tools = set_config()
-    # subject = Subject('03011')
-    # dwi = subject.get_unique(suffix='dwi', desc='preproc', pipeline='anima_preproc', extension='nii.gz')
-    # bval = subject.get_unique(extension='bval')
-    # bvec = subject.get_unique(extension='bvec', desc='preproc')
-    # mask = subject.get_unique(suffix='mask', label='brain', datatype='dwi')
+    
 
-    # res_dict = mcm_estimator(
-    #     dwi, bval, bvec, mask, 3,
-    #     R=True, F=True, S=True, c=2,
-    #     ml_mode=CLIArg('ml-mode', 2),
-    #     opt=CLIArg('optimizer', 'levenberg')
-    # )
-    # pprint(res_dict)
-
-    # mcmfile = MCMFile('/tmp/tmpq4y0e7ei/test/mcm.mcm')
-    # mcmfile.write('/tmp/tmpq4y0e7ei/test.mcmx')
-    # mcmfile = MCMFile('/tmp/tmpq4y0e7ei/test.mcmx')
-    # print(mcmfile.compartments)
-
-    mcm_vtk = "/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/derivatives/mcm_tensors_staniz/sub-01002/tracto/sub-01002_desc-cleaned_model-MCM_tracto.vtk"
-
-    fa_nii = "/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/derivatives/anima_preproc/sub-01002/dwi/sub-01002_metric-FA_model-DTI_dwi.nii.gz"
-
-    generate_scalar_map(
-        vtk_file_path=mcm_vtk,
-        reference_nifti_path=fa_nii,
-        output_dir='test_scalar_map',
-        output_file_prefix="tracts_mcm_out"
+    #### Central line extraction example 
+    ## Get all subjects in the dataset
+    dataset_path = "/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids"
+    output_base_path = '/home/ndecaux/Code/Data/actidep_atlas/moved_mcm_projections'
+    atlas_dir = '/home/ndecaux/Data/actidep_atlas'
+    
+    dataset = Actidep(dataset_path)
+    subjects = dataset.get_subjects()
+    # subjects = [s for s in subjects if '01034' in s]  # Filter for specific subject IDs, e.g., '01002'
+    print(f"Processing {len(subjects)} subjects...")
+    
+    # Set up multiprocessing
+    num_processes = 32#min(mp.cpu_count() - 1, len(subjects))  # Use all CPUs minus 1, or number of subjects if less
+    print(f"Using {num_processes} processes for parallel processing")
+    
+    # Create partial function with fixed parameters
+    process_func = partial(
+        process_subject,
+        dataset_path=dataset_path,
+        output_base_path=output_base_path,
+        atlas_dir=atlas_dir
     )
+    
+    # Process subjects in parallel
+    with mp.Pool(processes=num_processes) as pool:
+        results = pool.map(process_func, subjects)
+    
+    # Print summary
+    print("\n" + "="*50)
+    print("PROCESSING SUMMARY")
+    print("="*50)
+    for result in results:
+        print(result)
+    
+    print("\nProcessing complete!")
+
+    # generate_scalar_map(
+    #     vtk_file_path=mcm_vtk,
+    #     reference_nifti_path=fa_nii,
+    #     output_dir='test_scalar_map',
+    #     output_file_prefix="tracts_mcm_out"
+    # )
+
+
+    # ds = Actidep('/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+    # first_sub = ds.get_subjects()[0]
+    # print(f"First subject: {first_sub}")
+
+    # first_sub_centroids = [f.path for f in ds.get(
+    #     first_sub,
+    #     model='MCM',
+    #     desc='centroid',
+    #     suffix='tracto',
+    #     extension='vtk',
+    #     pipeline='tractometry'
+    # )]
+
+    # print(first_sub_centroids)
+
+    # for sub in ds.get_subjects():
+    #     print(f"Processing subject: {sub}")
+    #     sub_centroids = ds.get(sub,
+    #         model='MCM',
+    #         desc='centroid',
+    #         suffix='tracto',
+    #         extension='vtk',
+    #         pipeline='tractometry'
+    #     )
+    #     if not sub_centroids:
+    #         print(f"No centroid VTK files found for subject {sub}")
+    #         continue
+        
+    #     csv_files=extract_vtk_to_csv(vtk_file_paths=[s.path for s in sub_centroids], 
+    #                        output_base_path=os.path.join('/tmp/',sub),
+    #                        reference_vtk_file_paths=first_sub_centroids)
+        
+    #     res_dict = {v: {'metric': k} for k, v in csv_files.items()}
+
+    #     copy_from_dict(
+    #         subject=ds.get_subject(sub),
+    #         file_dict=res_dict,
+    #         pipeline='tractometry',
+    #         model='staniz',
+    #         suffix='mean',
+    #         datatype='metric'
+    #     )
+
+
