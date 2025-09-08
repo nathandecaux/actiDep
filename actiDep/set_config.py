@@ -79,6 +79,8 @@ def set_config():
                                               "antsRegister3DImageOnAtlas.py")
     animaDiffusionImagePreprocessing = os.path.join(
         animaScriptsDir, "diffusion", "animaDiffusionImagePreprocessing.py")
+    
+    animaPreprocRenaud = "/home/ndecaux/Code/Renaud/myAnimaDiffusionImagePreprocessing.py"
     Tractometry = os.path.join(animaPrivScriptsDir, "tractometry_Julie.py")
 
     #Check if fast is in path
@@ -104,7 +106,7 @@ def set_config():
         'animaRegister3DImageOnAtlas': animaRegister3DImageOnAtlas,
         'antsRegister3DImageOnAtlas': antsRegister3DImageOnAtlas,
         'Tractometry': Tractometry,
-        'animaDiffusionImagePreprocessing': animaDiffusionImagePreprocessing,
+        'animaDiffusionImagePreprocessing': animaPreprocRenaud,
         'fast': fast
     }
 
@@ -113,7 +115,7 @@ def set_config():
 import os
 import glob
 
-def get_HCP_bundle_names():
+def get_HCP_bundle_names(bundle_name=None,inverse=False):
     """
     Get the list of bundle names from the HCP dataset.
     """
@@ -127,80 +129,95 @@ def get_HCP_bundle_names():
     # bundle_names = [f.split('summed_')[-1].split('.trk')[0] for f in bundle_list]
 
     # return bundle_names
-    return {
-        "ORright": "OR_right",
-        "ICPleft": "ICP_left",
-        "ILFleft": "ILF_left",
-        "ILFright": "ILF_right",
-        "SCPleft": "SCP_left",
-        "CSTright": "CST_right",
-        "CSTleft": "CST_left",
-        "CC1": "CC_1",
-        "ORleft": "OR_left",
-        "SCPright": "SCP_right",
-        "CC3": "CC_3",
-        "FPTleft": "FPT_left",
-        "FPTright": "FPT_right",
-        "IFOleft": "IFO_left",
-        "POPTright": "POPT_right",
-        "POPTleft": "POPT_left",
-        "ATRleft": "ATR_left",
-        "ATRright": "ATR_right",
-        "IFOright": "IFO_right",
-        "SLFIIIleft": "SLF_III_left",
-        "STRleft": "STR_left",
-        "CC7": "CC_7",
-        "STRright": "STR_right",
-        "CC6": "CC_6",
-        "STFOleft": "ST_FO_left",
-        "CC5": "CC_5",
-        "SLFIleft": "SLF_I_left",
-        "SLFIIIright": "SLF_III_right",
-        "CC4": "CC_4",
-        "SLFIright": "SLF_I_right",
-        "STFOright": "ST_FO_right",
-        "SLFIIright": "SLF_II_right",
-        "MLFright": "MLF_right",
-        "SLFIIleft": "SLF_II_left",
-        "MCP": "MCP",
-        "MLFleft": "MLF_left",
-        "STOCCleft": "ST_OCC_left",
-        "CGleft": "CG_left",
-        "STPREMleft": "ST_PREM_left",
-        "STOCCright": "ST_OCC_right",
-        "CGright": "CG_right",
-        "STPREMright": "ST_PREM_right",
-        "CC2": "CC_2",
-        "STPOSTCright": "ST_POSTC_right",
-        "AFright": "AF_right",
-        "STPOSTCleft": "ST_POSTC_left",
-        "TOCCright": "T_OCC_right",
-        "STPRECright": "ST_PREC_right",
-        "STPRECleft": "ST_PREC_left",
-        "TOCCleft": "T_OCC_left",
-        "TPOSTCright": "T_POSTC_right",
-        "AFleft": "AF_left",
-        "TPOSTCleft": "T_POSTC_left",
-        "STPARright": "ST_PAR_right",
-        "TPREMleft": "T_PREM_left",
-        "TPREMright": "T_PREM_right",
-        "TPRECright": "T_PREC_right",
-        "TPARright": "T_PAR_right",
-        "STPREFright": "ST_PREF_right",
-        "STPREFleft": "ST_PREF_left",
-        "TPREFright": "T_PREF_right",
-        "FXright": "FX_right",
-        "FXleft": "FX_left",
-        "CA": "CA",
-        "ICPright": "ICP_right",
-        "STPARleft": "ST_PAR_left",
-        "TPRECleft": "T_PREC_left",
-        "UFleft": "UF_left",
-        "UFright": "UF_right",
-        "TPARleft": "T_PAR_left",
-        "TPREFleft": "T_PREF_left"
-    }
-
+    if bundle_name is None:
+        if not inverse:
+            return {
+                "ORright": "OR_right",
+                "ICPleft": "ICP_left",
+                "ILFleft": "ILF_left",
+                "ILFright": "ILF_right",
+                "SCPleft": "SCP_left",
+                "CSTright": "CST_right",
+                "CSTleft": "CST_left",
+                "CC1": "CC_1",
+                "ORleft": "OR_left",
+                "SCPright": "SCP_right",
+                "CC3": "CC_3",
+                "FPTleft": "FPT_left",
+                "FPTright": "FPT_right",
+                "IFOleft": "IFO_left",
+                "POPTright": "POPT_right",
+                "POPTleft": "POPT_left",
+                "ATRleft": "ATR_left",
+                "ATRright": "ATR_right",
+                "IFOright": "IFO_right",
+                "SLFIIIleft": "SLF_III_left",
+                "STRleft": "STR_left",
+                "CC7": "CC_7",
+                "STRright": "STR_right",
+                "CC6": "CC_6",
+                "STFOleft": "ST_FO_left",
+                "CC5": "CC_5",
+                "SLFIleft": "SLF_I_left",
+                "SLFIIIright": "SLF_III_right",
+                "CC4": "CC_4",
+                "SLFIright": "SLF_I_right",
+                "STFOright": "ST_FO_right",
+                "SLFIIright": "SLF_II_right",
+                "MLFright": "MLF_right",
+                "SLFIIleft": "SLF_II_left",
+                "MCP": "MCP",
+                "MLFleft": "MLF_left",
+                "STOCCleft": "ST_OCC_left",
+                "CGleft": "CG_left",
+                "STPREMleft": "ST_PREM_left",
+                "STOCCright": "ST_OCC_right",
+                "CGright": "CG_right",
+                "STPREMright": "ST_PREM_right",
+                "CC2": "CC_2",
+                "STPOSTCright": "ST_POSTC_right",
+                "AFright": "AF_right",
+                "STPOSTCleft": "ST_POSTC_left",
+                "TOCCright": "T_OCC_right",
+                "STPRECright": "ST_PREC_right",
+                "STPRECleft": "ST_PREC_left",
+                "TOCCleft": "T_OCC_left",
+                "TPOSTCright": "T_POSTC_right",
+                "AFleft": "AF_left",
+                "TPOSTCleft": "T_POSTC_left",
+                "STPARright": "ST_PAR_right",
+                "TPREMleft": "T_PREM_left",
+                "TPREMright": "T_PREM_right",
+                "TPRECright": "T_PREC_right",
+                "TPARright": "T_PAR_right",
+                "STPREFright": "ST_PREF_right",
+                "STPREFleft": "ST_PREF_left",
+                "TPREFright": "T_PREF_right",
+                "FXright": "FX_right",
+                "FXleft": "FX_left",
+                "CA": "CA",
+                "ICPright": "ICP_right",
+                "STPARleft": "ST_PAR_left",
+                "TPRECleft": "T_PREC_left",
+                "UFleft": "UF_left",
+                "UFright": "UF_right",
+                "TPARleft": "T_PAR_left",
+                "TPREFleft": "T_PREF_left"
+            }
+        else:
+            return get_HCP_bundle_names(inverse=False)
+    else:
+        if not inverse:
+            mapping = get_HCP_bundle_names()
+            return mapping.get(bundle_name,bundle_name)
+        else:
+            mapping = get_HCP_bundle_names()
+            inv_mapping = {v: k for k, v in mapping.items()}
+            return inv_mapping.get(bundle_name,bundle_name)
 
 if __name__ == '__main__':
     set_config()
+    print(get_HCP_bundle_names())
+    print(get_HCP_bundle_names("OR_right",inverse=True))
+    print(get_HCP_bundle_names("ORright",inverse=False))
+    

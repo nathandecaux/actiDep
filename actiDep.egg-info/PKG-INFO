@@ -10,14 +10,517 @@ Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.6
 Description-Content-Type: text/markdown
+License-File: LICENSE
 Requires-Dist: pandas
 Requires-Dist: numpy
 Requires-Dist: matplotlib
 Dynamic: author
 Dynamic: author-email
 Dynamic: classifier
+Dynamic: description
 Dynamic: description-content-type
 Dynamic: home-page
 Dynamic: requires-dist
 Dynamic: requires-python
 Dynamic: summary
+
+# actiDep - Pipeline de Traitement des Données de Diffusion
+
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+`actiDep` est un package Python complet pour le traitement et l'analyse des données de diffusion IRM dans le cadre du projet ActiDep. Il fournit une pipeline modulaire et extensible pour l'analyse microstructurelle, la tractographie et la tractométrie.
+
+## 📋 Table des Matières
+
+- [Installation](#-installation)
+- [Configuration](#️-configuration)
+- [Structure du Projet](#-structure-du-projet)
+- [Utilisation](#-utilisation)
+- [Modules Principaux](#-modules-principaux)
+- [API Reference](#-api-reference)
+- [Exemples](#-exemples)
+- [Contribuer](#-contribuer)
+- [License](#-license)
+
+## 🚀 Installation
+
+### Prérequis
+
+- Python 3.8+
+- FSL (FMRIB Software Library)
+- ANIMA (Medical Imaging Analysis software)
+- MRtrix3
+- TractSeg
+- ANTs (Advanced Normalization Tools)
+
+### Installation du package
+
+```bash
+# Clone du repository
+git clone https://github.com/nathandecaux/ActiDep.git
+cd ActiDep
+
+# Installation des dépendances
+pip install -r requirements.txt
+
+# Installation en mode développement
+pip install -e .
+```
+
+## ⚙️ Configuration
+
+### Configuration ANIMA
+
+Créez le fichier `~/.anima/config.txt` :
+
+```ini
+[anima-scripts]
+anima = /path/to/anima/bin
+extra-data-root = /path/to/anima/data
+anima-scripts-public-root = /path/to/anima/scripts/public
+anima-scripts-root = /path/to/anima/scripts
+```
+
+### Configuration TractSeg
+
+Créez le fichier `~/.tractseg-config/config.txt` :
+
+```ini
+[tractseg]
+tractseg-bin = /path/to/tractseg/bin
+mrtrix-bin = /path/to/mrtrix/bin
+```
+
+## 📁 Structure du Projet
+
+```text
+actiDep/
+├── __init__.py
+├── core.py                    # Module principal
+├── set_config.py             # Configuration des outils externes
+├── analysis/                 # Modules d'analyse
+│   ├── fiber_density.py     # Analyse de densité de fibres
+│   ├── mcm_odf.py           # Analyse MCM et ODF
+│   ├── microstructure.py    # Analyse microstructurelle
+│   ├── stats.ipynb          # Analyses statistiques
+│   └── tractometry.py       # Tractométrie
+├── atlasing/                # Modules d'atlasing
+│   ├── actidep_atlasing.py  # Atlasing spécifique ActiDep
+│   ├── HCP_atlasing.py      # Atlasing HCP
+│   ├── HCP_atlasing_anima.py
+│   └── HCP_averaging.py     # Moyennage de tractogrammes
+├── data/                    # Gestion des données
+│   ├── ancp_loader.py       # Chargeur ANCP
+│   ├── io.py                # Entrées/sorties
+│   ├── loader.py            # Chargeur principal BIDS
+│   └── mcmfile.py           # Gestion fichiers MCM
+├── pipeline/                # Pipelines de traitement
+│   ├── bundle_seg.py        # Segmentation de faisceaux
+│   ├── classifyber.py       # Classification de fibres
+│   ├── mcm_3_comparts.py    # Modèle MCM 3 compartiments
+│   ├── msmt_csd.py          # Multi-Shell Multi-Tissue CSD
+│   ├── preprocessing.py     # Prétraitement
+│   ├── recobundle_segmentation.py
+│   └── tractseg_pipeline.py # Pipeline TractSeg
+├── ui/                      # Interface utilisateur
+│   ├── browser.py           # Navigateur de données
+│   ├── tractometry_dashboard.py # Dashboard tractométrie
+│   └── templates/           # Templates web
+├── utils/                   # Utilitaires
+│   ├── clustering.py        # Clustering de streamlines
+│   ├── converters.py        # Convertisseurs de format
+│   ├── fod.py               # Fonctions FOD
+│   ├── hash_utils.py        # Utilitaires de hash
+│   ├── mcm.py               # Utilitaires MCM
+│   ├── recobundle.py        # Segmentation RecoBundles
+│   ├── registration.py     # Recalage d'images
+│   ├── segmentation.py     # Segmentation
+│   ├── tools.py            # Outils génériques
+│   ├── tractography.py     # Tractographie
+│   └── tractseg_utils.py   # Utilitaires TractSeg
+└── visualisation/          # Visualisation
+    ├── atlas_visu.py       # Visualisation d'atlas
+    ├── centroids_params.py # Interface clustering
+    └── create_rotating_3D_gif.py
+```
+
+## 🔧 Utilisation
+
+### Exemple de base
+
+```python
+from actiDep.data.loader import Actidep, Subject
+from actiDep.analysis.tractometry import process_projection
+from actiDep.set_config import set_config
+
+# Configuration
+config, tools = set_config()
+
+# Chargement des données
+dataset = Actidep("/path/to/bids/dataset")
+subject = Subject("01002", db_root="/path/to/bids/dataset")
+
+# Récupération des fichiers
+fa_files = subject.get(pipeline='anima_preproc', metric='FA', extension='nii.gz')
+tracto_files = subject.get(pipeline='bundle_seg', suffix='tracto', extension='trk')
+
+# Analyse tractométrique
+results = process_projection(tracto_files, fa_files)
+```
+
+### Pipeline complet
+
+```python
+from actiDep.pipeline.msmt_csd import process_response, process_fod
+from actiDep.pipeline.bundle_seg import run_bundle_segmentation
+from actiDep.analysis.tractometry import process_tractseg_analysis
+
+# 1. Calcul des réponses tissulaires
+process_response(subject, dwi_data, "msmt_csd")
+
+# 2. Calcul des FOD
+process_fod(subject, dwi_data, "msmt_csd")
+
+# 3. Segmentation de faisceaux
+run_bundle_segmentation(subject, "bundle_seg")
+
+# 4. Analyse tractométrique
+process_tractseg_analysis("subjects.txt", metric='FA')
+```
+
+## 📚 Modules Principaux
+
+### 🔬 Analysis
+
+#### `tractometry.py`
+
+Module principal pour l'analyse tractométrique des faisceaux de substance blanche.
+
+**Fonctions principales :**
+
+- `evaluate_along_streamlines()` : Évaluation de métriques le long des streamlines
+- `process_projection()` : Projection de métriques sur les faisceaux
+- `process_tractseg_analysis()` : Analyse complète avec TractSeg
+
+**Algorithmes disponibles :**
+
+- `equal_dist` : Échantillonnage équidistant
+- `distance_map` : Agrégation par cartes de distance (cKDTree)
+- `cutting_plane` : Approche par plans de coupe
+- `afq` : Méthode AFQ (Automated Fiber Quantification)
+
+#### `fiber_density.py`
+
+Analyse de la densité de fibres et création de templates avec ANTs.
+
+#### `microstructure.py`
+
+Analyse microstructurelle avec traitement des fichiers VTK/MCM.
+
+### 🗂️ Data
+
+#### `loader.py`
+
+Système de chargement compatible BIDS avec la classe `ActiDepFile` comme alternative légère à PyBIDS.
+
+**Classes principales :**
+
+- `ActiDepFile` : Représentation d'un fichier BIDS
+- `Subject` : Gestion d'un sujet individuel
+- `Actidep` : Interface pour l'ensemble du dataset
+
+#### `io.py`
+
+Fonctions d'entrées/sorties avec conversion automatique entre formats.
+
+### 🔄 Pipeline
+
+#### `msmt_csd.py`
+
+Pipeline Multi-Shell Multi-Tissue Constrained Spherical Deconvolution.
+
+**Étapes :**
+
+1. Calcul des réponses tissulaires (`process_response`)
+2. Estimation des FOD (`process_fod`)
+3. Normalisation (`process_normalize`)
+4. Analyse basée sur les fixels (`process_fixels`)
+5. Tractographie iFOD2 (`process_ifod2_tracto`)
+
+#### `bundle_seg.py`
+
+Segmentation automatique de faisceaux avec RecoBundles et TractSeg.
+
+### 🛠️ Utils
+
+#### `tractography.py`
+
+Génération et manipulation de tractogrammes.
+
+**Fonctions :**
+
+- `generate_ifod2_tracto()` : Tractographie iFOD2 avec MRtrix
+- `generate_trekker_tracto()` : Tractographie avec Trekker
+- `get_tractogram_endings()` : Détection des extrémités de faisceaux
+
+#### `registration.py`
+
+Recalage d'images avec ANTs et autres outils.
+
+#### `mcm.py`
+
+Utilitaires pour les modèles Multi-Compartment Model (MCM).
+
+### 🎨 Visualisation
+
+#### `centroids_params.py`
+
+Interface interactive pour le clustering de tractogrammes avec QuickBundles.
+
+#### `atlas_visu.py`
+
+Visualisation d'atlas et de tractogrammes.
+
+## 📊 API Reference
+
+### Configuration
+
+```python
+from actiDep.set_config import set_config, get_HCP_bundle_names
+
+# Configuration des outils
+config, tools = set_config()
+
+# Noms des faisceaux HCP
+bundle_names = get_HCP_bundle_names()
+```
+
+### Chargement des Données
+
+```python
+from actiDep.data.loader import Actidep, Subject
+
+# Dataset complet
+dataset = Actidep("/path/to/dataset")
+subjects = dataset.get_subjects()
+
+# Sujet individuel
+subject = Subject("01002")
+files = subject.get(pipeline="anima_preproc", suffix="mask", label="brain")
+```
+
+### Analyse Tractométrique
+
+```python
+from actiDep.analysis.tractometry import evaluate_along_streamlines
+
+# Évaluation le long des streamlines
+means, stds = evaluate_along_streamlines(
+    scalar_img=fa_data,
+    streamlines=tractogram,
+    nr_points=100,
+    affine=affine
+)
+```
+
+### Pipeline de Traitement
+
+```python
+from actiDep.pipeline.msmt_csd import process_response, process_fod
+
+# Réponses tissulaires
+responses = process_response(subject, dwi_file, "pipeline_name")
+
+# Fonctions d'orientation de fibres
+fods = process_fod(subject, dwi_file, "pipeline_name")
+```
+
+## 💡 Exemples
+
+### Analyse Tractométrique Complète
+
+```python
+#!/usr/bin/env python3
+"""
+Exemple d'analyse tractométrique complète
+"""
+
+from actiDep.data.loader import Actidep
+from actiDep.analysis.tractometry import process_tractseg_analysis
+
+# Configuration du dataset
+dataset_path = "/path/to/actidep/bids"
+subjects_file = "subjects.txt"
+
+# Analyse tractométrique avec TractSeg
+process_tractseg_analysis(
+    subjects_txt=subjects_file,
+    dataset_path=dataset_path,
+    metric='FA',  # ou 'MD', 'RD', 'AD'
+    with_3dplot=True
+)
+```
+
+### Pipeline de Segmentation de Faisceaux
+
+```python
+#!/usr/bin/env python3
+"""
+Pipeline de segmentation automatique de faisceaux
+"""
+
+from actiDep.data.loader import Subject
+from actiDep.pipeline.bundle_seg import run_bundle_segmentation
+from actiDep.utils.recobundle import create_whole_brain_tract
+
+# Sujet d'exemple
+subject = Subject("01002")
+
+# Segmentation des faisceaux
+results = run_bundle_segmentation(subject, "bundle_seg")
+
+# Création d'un tractogramme complet
+whole_brain = create_whole_brain_tract(
+    tract_list=results['tracts'],
+    ref_image=results['reference']
+)
+```
+
+### Clustering Interactif
+
+```python
+#!/usr/bin/env python3
+"""
+Interface interactive pour le clustering de tractogrammes
+"""
+
+from actiDep.visualisation.centroids_params import TractoClusteringApp
+
+# Lancement de l'interface
+app = TractoClusteringApp()
+app.load_data(
+    tractogram_file="/path/to/tractogram.trk",
+    anatomy_file="/path/to/anatomy.nii.gz"
+)
+app.run()
+```
+
+### Analyse Microstructurelle
+
+```python
+#!/usr/bin/env python3
+"""
+Analyse des paramètres microstructurels avec MCM
+"""
+
+from actiDep.analysis.microstructure import MCMVTKReader
+from actiDep.utils.mcm import project_to_central_line_from_vtk
+
+# Lecture des données MCM
+vtk_file = "/path/to/mcm_tractogram.vtk"
+reader = MCMVTKReader(vtk_file)
+
+# Extraction des paramètres
+metadata = reader.get_metadata()
+streamlines = reader.extract_streamlines(0, 10)
+
+# Projection sur ligne centrale
+project_to_central_line_from_vtk(
+    vtk_file_path=vtk_file,
+    reference_nifti_path="/path/to/reference.nii.gz",
+    output_path="/path/to/output.vtk"
+)
+```
+
+## 🧪 Tests
+
+Le projet inclut une suite de tests dans le dossier `tests/` :
+
+```bash
+# Exécution des tests
+python -m pytest tests/
+
+# Tests spécifiques
+python tests/test_core.py
+python tests/test_transfo.py
+```
+
+## 📈 Formats de Données Supportés
+
+### Formats d'Entrée
+
+- **Images :** NIfTI (.nii, .nii.gz), NRRD, Analyze
+- **Tractogrammes :** TRK, TCK, VTK, PLY
+- **Gradients :** FSL (.bval/.bvec), MRtrix (.b)
+- **Transformations :** ITK (.mat, .txt), ANTs (.h5)
+
+### Formats de Sortie
+
+- **Métriques :** CSV, JSON, NIfTI
+- **Tractogrammes :** TRK, TCK, VTK
+- **Visualisations :** PNG, HTML (plotly), GIF
+
+## 🔧 Configuration Avancée
+
+### Variables d'Environnement
+
+```bash
+export ANIMA_SCRIPTS_DIR="/path/to/anima/scripts"
+export TRACTSEG_DIR="/path/to/tractseg"
+export MRTRIX_DIR="/path/to/mrtrix"
+export ACTIDEP_DATA="/path/to/actidep/data"
+```
+
+### Parallélisation
+
+```python
+from actiDep.utils.tools import run_cli_command
+
+# Utilisation de plusieurs cœurs
+results = run_cli_command(
+    command="anima_command",
+    inputs=inputs,
+    output_patterns=patterns,
+    n_cores=8
+)
+```
+
+## 🤝 Contribuer
+
+1. Fork le projet
+2. Créez une branche feature (`git checkout -b feature/AmazingFeature`)
+3. Committez vos changements (`git commit -m 'Add some AmazingFeature'`)
+4. Push vers la branche (`git push origin feature/AmazingFeature`)
+5. Ouvrez une Pull Request
+
+### Standards de Code
+
+- Suivre PEP 8
+- Documenter les fonctions avec des docstrings
+- Inclure des tests pour les nouvelles fonctionnalités
+- Utiliser type hints quand approprié
+
+## 📝 License
+
+Ce projet est sous licence MIT. Voir le fichier [LICENSE](LICENSE) pour plus de détails.
+
+## 👨‍💻 Auteur
+
+**Nathan Decaux** - *Développeur principal* - [nathan.decaux@irisa.fr](mailto:nathan.decaux@irisa.fr)
+
+## 🙏 Remerciements
+
+- Équipe EMPENN (IRISA/INRIA)
+- Projet ActiDep
+- Communautés FSL, MRtrix, ANIMA et TractSeg
+
+## 📚 Références
+
+- Wassermann, D. et al. (2016). The white matter query language. Nature Methods.
+- Yeatman, J. D. et al. (2012). Tract profiles of white matter properties. PLoS One.
+- Wasserthal, J. et al. (2018). TractSeg - Fast and accurate white matter tract segmentation.
+
+---
+
+Pour plus d'informations, consultez la [documentation complète](https://github.com/nathandecaux/ActiDep/wiki) ou créez une [issue](https://github.com/nathandecaux/ActiDep/issues) pour poser vos questions.

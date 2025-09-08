@@ -41,7 +41,6 @@ def init_pipeline(subject, pipeline, **kwargs):
 def process_response(subject, dwi_data, pipeline, **kwargs):
     """Calculate tissue response functions"""
     dwi, bval, bvec, mask = dwi_data
-    print(f"Processing response with mask: {mask}")
     res_dict = get_tissue_responses(dwi, bval, bvec, mask, inverse_bvec=True, **kwargs)
     copy_from_dict(subject, res_dict, pipeline=pipeline)
 
@@ -70,26 +69,26 @@ def process_normalize(subject, pipeline, **kwargs):
     wm_fod = subject.get_unique(label='WM', suffix='fod', pipeline=pipeline, desc='preproc')
     gm_fod = subject.get_unique(label='GM', suffix='fod', pipeline=pipeline, desc='preproc')
     csf_fod = subject.get_unique(label='CSF', suffix='fod', pipeline=pipeline, desc='preproc')
-    mask = subject.get_unique(suffix='mask', label='brain', datatype='dwi', space='B0')
+    mask = subject.get_unique(suffix='mask', label='brain',  space='B0')
     res_dict = normalize_fod(wm_fod, gm_fod, csf_fod, mask, **kwargs)
     copy_from_dict(subject, res_dict, pipeline=pipeline)
 
 def process_fixels(subject, pipeline, **kwargs):
     """Perform fixel-based analysis"""
-    wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='normalized', suffix='fod')
-    mask = subject.get_unique(suffix='mask', label='brain', datatype='dwi', space='B0')
+    wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='preproc', suffix='fod')
+    mask = subject.get_unique(suffix='mask', label='brain', space='B0')
     res_dict = fod_to_fixels(fod=wm_fod, mask=mask, max_peaks=CLIArg('maxnum', 3), **kwargs)
     copy_from_dict(subject, res_dict, pipeline=pipeline)
 
 def process_peaks(subject, pipeline, **kwargs):
     """Perform peak extraction"""
-    wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='normalized', suffix='fod')
+    wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='preproc', suffix='fod')
     peaks_dict = get_peaks(wm_fod, **kwargs)
     copy_from_dict(subject, peaks_dict, pipeline=pipeline)
 
 def process_peak_density(subject, pipeline, **kwargs):
     """Calculate peak density from peaks"""
-    peaks = subject.get_unique(suffix='peaks', label='WM', desc='normalized', pipeline=pipeline)
+    peaks = subject.get_unique(suffix='peaks', label='WM', desc='preproc', pipeline=pipeline)
     peak_density = get_peak_density(peaks, **kwargs)
     entities = peaks.get_entities()
     entities = upt_dict(entities, suffix='density', extension='nii.gz', pipeline=pipeline)
@@ -113,14 +112,14 @@ def process_fixel_density(subject, pipeline, **kwargs):
 
 def process_ifod2_tracto(subject, pipeline, **kwargs):
     """Run iFOD2 tractography"""
-    odf = subject.get_unique(suffix='fod', label='WM', desc='normalized', pipeline=pipeline)
+    odf = subject.get_unique(suffix='fod', label='WM', desc='preproc', pipeline=pipeline)
     seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
     tracto = generate_ifod2_tracto(odf, seeds, **kwargs)
-    copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='ifod2',label='brain',desc='pouet')
+    copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='ifod2',label='brain')
 
 def process_trekker_tracto(subject, pipeline, **kwargs):
     """Run Trekker tractography"""
-    odf = subject.get_unique(suffix='fod', label='WM', desc='normalized', pipeline=pipeline)
+    odf = subject.get_unique(suffix='fod', label='WM', desc='preproc', pipeline=pipeline)
     seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
     tracto = generate_trekker_tracto_tck(odf,seeds, **kwargs)
     copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='trekker')
@@ -146,12 +145,12 @@ def process_msmt_csd(subject):
         # 'response',
         # 'fod',
         # 'normalize',
-        # 'fixels',
+        'fixels',
         # 'peaks',
         # 'peak_density',
-        # 'fixels2peaks',
-        # "fixel_density",
-        'ifod2_tracto',
+        'fixels2peaks',
+        "fixel_density",
+        # 'ifod2_tracto',
         # 'trekker_tracto'
     ]
     
@@ -177,6 +176,8 @@ def process_msmt_csd(subject):
         if step in step_mapping:
             print(f"Running step: {step}")
             step_mapping[step]()
+            #Refresh the subject object to ensure it has the latest data
+            subject = Subject(subject.sub_id, db_root=subject.db_root)
     
 
 
@@ -184,25 +185,27 @@ def process_msmt_csd(subject):
 if __name__ == "__main__":
     #If hostname is calcarine, set tempdir to /local/ndecaux/tmp
 
-    # if os.uname()[1] == 'calcarine':
-    #     tempfile.tempdir = '/local/ndecaux/tmp'
+    if os.uname()[1] == 'calcarine':
+        tempfile.tempdir = '/local/ndecaux/tmp'
 
-    # config, tools = set_config()
-    # print("MSMT-CSD pipeline")
-    # print("=====================================")
-    # print('Reading dataset')
+    config, tools = set_config()
+    print("MSMT-CSD pipeline")
+    print("=====================================")
+    print('Reading dataset')
     # ds = Actidep('/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
-    # print(f"Found {len(ds.subject_ids)} subjects")
-    # print("=====================================")
-    # for sub in ds.subject_ids:
-    #     subject = ds.get_subject(sub)
-    #     if len(subject.get(suffix='tracto', algo='ifod2', pipeline='msmt_csd', extension='tck')) == 1:
-    #         print(f"Skipping subject {sub} as tractography already exists")
-    #         continue
-    #     print(f"Processing subject: {sub}")
-    #     process_msmt_csd(subject)
+    # ds = Actidep('/home/ndecaux/Code/Data/dysdiago')
+    ds = Actidep('/home/ndecaux/NAS_EMPENN/share/projects/actidep/IRM_Cerveau_MOI/bids')
+    print(f"Found {len(ds.subject_ids)} subjects")
+    print("=====================================")
+    for sub in ds.subject_ids:
+        subject = ds.get_subject(sub)
+        if len(subject.get(suffix='tracto', algo='ifod2', pipeline='msmt_csd', extension='tck')) == 1:
+            print(f"Skipping subject {sub} as tractography already exists")
+            # continue
+        print(f"Processing subject: {sub}")
+        process_msmt_csd(subject)
 
-    sub = Subject('01001','/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+    # sub = Subject('00001','/home/ndecaux/Code/Data/comascore')
     # process_msmt_csd(sub)
     
-    process_msmt_csd(sub)
+    # process_msmt_csd(sub)

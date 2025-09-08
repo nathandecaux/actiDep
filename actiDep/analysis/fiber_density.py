@@ -7,39 +7,49 @@ from actiDep.data.loader import Subject, Actidep, ActiDepFile
 import tempfile
 from subprocess import call
 
-def average_with_ants(dataset, output_file=None):
+def average_with_ants(dataset, output_dir=None):
     """
     Find all subject files with desc-fixels2peak and suffix=density,
     transform them to common space and create template using antsMultivariateTemplateConstruction2.sh
     """
 
-    #Create a tempdir
-    temp_dir = tempfile.TemporaryDirectory()
-    print(f"Temporary directory created at: {temp_dir.name}")
-    if output_file is None:
-        output_file = Path(temp_dir.name) / 'fiber_density_'
+    # Define output directory
+    if output_dir is None:
+        output_dir = '/local/ndecaux/Data/actidep_atlas'
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Define output file prefix
+    output_file = Path(output_dir) / 'fiber_density_'
+
+    # Get files
     files = dataset.get_global(pipeline='anima_preproc', metric='FA', extension='nii.gz')
 
-    #Create a line separated string with all the files paths    
+    # Create a line separated string with all the files paths    
     file_list = '\n'.join([str(file.path) for file in files])
     print(file_list)
-    file_list_path = Path(temp_dir.name) / 'file_list.txt'
+    
+    # Create file list directly in the output directory
+    file_list_path = Path(output_dir) / 'file_list.txt'
     with open(file_list_path, 'w') as f:
         f.write(file_list)
     
-    #Run antsMultivariateTemplateConstruction2.sh
+    # Run antsMultivariateTemplateConstruction2.sh
     cmd = ['antsMultivariateTemplateConstruction2.sh',
            '-d', '3',
            '-o', str(output_file),
            '-c', '2',
            '-n', '0',
-           '-j', '40',
+           '-j', '32',
+           '-t', 'Affine',
             str(file_list_path)]
     
     print(f"Running command: {' '.join(cmd)}")
     call(cmd)
 
     print(f"Template created at: {output_file}")
+
     
 
 # Example usage

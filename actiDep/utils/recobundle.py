@@ -11,6 +11,7 @@ from actiDep.data.loader import Subject, parse_filename, ActiDepFile
 from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli, run_cli_command, run_mrtrix_command
 from actiDep.utils.registration import ants_registration
 from actiDep.utils.tractography import apply_affine
+from actiDep.set_config import get_HCP_bundle_names
 import SimpleITK as sitk
 import json
 import tempfile
@@ -407,8 +408,67 @@ def call_recobundle(streamlines_file, model_file, **kwargs):
     res_dict = run_cli_command('dipy_recobundles', inputs, output_patterns, entities_template=streamlines_file.get_entities(), **kwargs)
     return res_dict
 
+def prepare_atlas_for_recobundle(model_list, model_config, model_T1,temp_dir=None, **kwargs):
+    """
+    Prepare the atlas for RecoBundles by registering the model T1 to each model in the model list.
 
-def process_bundleseg(streamlines_file, fa_file, atlas_dir='/home/ndecaux/Data/SCIL_Atlas/',**kwargs):
+    Parameters
+    ----------
+    model_list : list
+        List of model files (list of trk paths)
+    model_config : float, list or dict
+        If float, it is the threshold for all models
+        If list, it is the list of thresholds for each model (paired with model_list)
+        If dict, it is a dictionary with model names as keys and thresholds as values
+    model_T1 : str
+        Path to the model T1 file
+    temp_dir : str, optional
+        Path to a temporary directory to store symlink or create files
+    kwargs : dict
+        Additional arguments to pass to the registration script
+    """
+
+    if temp_dir is None:
+        temp_dir = tempfile.mkdtemp()
+    os.chdir(temp_dir)
+
+    # Create a symbolic link to model_T1 and all models in model_list in temp_dir
+    temp_model_T1 = os.path.abspath(os.path.join(temp_dir, 'atlas_anat.nii.gz'))
+    if not os.path.exists(temp_model_T1):
+        os.symlink(os.path.abspath(model_T1), temp_model_T1)
+
+    temp_model_list = []
+    #Create folders atlas/models/
+    os.makedirs(opj(temp_dir, 'atlas', 'models'), exist_ok=True)
+    for i, model in enumerate(model_list):
+        temp_model = os.path.basename(model)
+        if not os.path.exists(temp_model):
+            os.symlink(os.path.abspath(model), opj(temp_dir, 'atlas', 'models',temp_model))
+        temp_model_list.append(temp_model)
+    
+    #If model_config is dict, save it as json in temp_dir
+    temp_model_config = os.path.abspath(os.path.join(temp_dir, 'config.json'))
+
+    if isinstance(model_config, dict):
+        with open(temp_model_config, 'w') as f:
+            json.dump(model_config, f)
+    elif isinstance(model_config, list):
+        if len(model_config) != len(model_list):
+            raise ValueError("If model_config is a list, it must have the same length as model_list")
+        model_config_dict = {model: thresh for model, thresh in zip(temp_model_list, model_config)}
+        with open(temp_model_config, 'w') as f:
+            json.dump(model_config_dict, f)
+    else :#isinstance(model_config, float) or isinstance(model_config, int) or isinstance(model_config, str):
+        model_config_dict = {model:model_config for model in temp_model_list}
+        with open(temp_model_config, 'w') as f:
+            json.dump(model_config_dict, f)
+    
+    return temp_dir
+
+
+
+
+def process_bundleseg(streamlines_file, fa_file, atlas_dir='/home/ndecaux/Data/SCIL_Atlas/',config='config.json',rbx_dir='/home/ndecaux/Git/rbx_flow', **kwargs):
     """
     Process the bundle segmentation using the BundleSeg pipeline.
     """
@@ -444,20 +504,50 @@ def process_bundleseg(streamlines_file, fa_file, atlas_dir='/home/ndecaux/Data/S
         "streamlines": temp_streamlines,
         "fa": temp_fa,
     }
+    #Read main_HCP.nf, and replace config.json by 'config' value
+    nf_file=os.path.join(rbx_dir, 'main_HCP.nf')
+    with open(nf_file, 'r') as f:
+        nf_content = f.read()
+        nf_content = nf_content.replace('config.json', config)
+    temp_nf_file = os.path.join(temp_dir, 'main_HCP.nf')
+    with open(temp_nf_file, 'w') as f:
+        f.write(nf_content)
+    
+    #Symlink the temp main_HCP.nf to rbx_dir (with name f{temp_dir}_main_HCP.nf)
+    temp_id=os.path.basename(temp_dir)
+    if not os.path.exists(os.path.join(rbx_dir, f'{temp_id}_main_HCP.nf')):
+        os.symlink(temp_nf_file, os.path.join(rbx_dir, f'{temp_id}_main_HCP.nf'))
 
-    rbx_dir = '/home/ndecaux/Git/rbx_flow'
 
-    cmd = f'run {rbx_dir}/main_HCP.nf --input {temp_dir} --atlas_directory {atlas_dir} -with-singularity {rbx_dir}/scilus_latest.sif -w {temp_dir}'
+
+    cmd = f'run {rbx_dir}/{temp_id}_main_HCP.nf --input {temp_dir} --atlas_directory {atlas_dir} -with-singularity {rbx_dir}/scilus_latest.sif -w {temp_dir}'
     cmd = cmd.split(' ')
     #Set the following environment variable : NXF_VER=21.04.0
     os.environ['NXF_VER'] = '21.10.0'
 
     run_cli_command('nextflow', inputs, {}, entities_template=streamlines_file.get_entities(), command_args=cmd, **kwargs)
 
+    #Use glob to find all recognized bundles in temp_dir/*/*/_cleaned.trk
+    recognized_bundles = glob.glob(os.path.join(temp_dir, "*", "*", "*_cleaned.trk"))
+
+    res_dict = {}
+    bundle_map = get_HCP_bundle_names()
+    entities=streamlines_file.get_entities()
+    for bundle in recognized_bundles:
+        #Extract bundle name from path 
+        bundle_name = [i for i,b in bundle_map.items() if b in str(bundle) or i in str(bundle)]
+        if len(bundle_name) != 0:
+            bundle_name = bundle_name[0]
+        else:
+            print(f"Bundle name not found for {bundle}")
+            raise
+        res_dict[bundle] = upt_dict(entities, {
+            "bundle": bundle_name,"extension": "trk"
+        })
     
+    return res_dict
 
-
-
+    
 
 if __name__ == "__main__":
     config, tools = set_config()

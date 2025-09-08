@@ -9,3 +9,12 @@ subjects.txt
 ist
 output_subplots
 *.pdf
+*.nii.gz
+build/
+dist/
+actiDep.egg-info/SOURCES.txt
+*.sync-conflict*
+*.png
+*.mp4
+*.json
+*.csv

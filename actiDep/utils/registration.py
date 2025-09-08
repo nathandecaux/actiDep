@@ -7,7 +7,7 @@ import sys
 import pathlib
 from subprocess import call
 from actiDep.set_config import set_config
-from actiDep.data.loader import Subject
+from actiDep.data.loader import Subject, ActiDepFile
 from actiDep.utils.tools import del_key, upt_dict, run_cli_command
 from actiDep.data.io import copy_from_dict
 import SimpleITK as sitk
@@ -18,7 +18,7 @@ import shutil
 import ants
 
 
-def ants_registration(moving, fixed, outprefix='registered', **kwargs):
+def ants_registration(moving, fixed, outprefix='registered',transform_type='affine', **kwargs):
     """
     Calls the ANTs registration script on the given subject.
 
@@ -59,6 +59,7 @@ def ants_registration(moving, fixed, outprefix='registered', **kwargs):
         "-o", outprefix
     ]
 
+
     # Get base entities
     base_entities = {}
     if hasattr(moving, "get_entities"):
@@ -72,8 +73,15 @@ def ants_registration(moving, fixed, outprefix='registered', **kwargs):
         f"{outprefix}1InverseWarp.nii.gz": upt_dict(base_entities, {"suffix": "xfm", "extension": "nii.gz", "from": fixed_space, "to": moving_space}),
     }
 
+    
+    if transform_type == 'affine':
+        command_args += ["-t", "a"]
+        output_pattern.pop(f"{outprefix}1Warp.nii.gz", None)
+        output_pattern.pop(f"{outprefix}1InverseWarp.nii.gz", None)
+    elif transform_type == 'syn':
+        command_args += ["-t", "s"]
     #Add the suffix of the keys in the output_pattern as a desc entity
-    output_pattern = {k: upt_dict(v, {"desc": k.split(outprefix)[1].split('.')[0]}) for k, v in output_pattern.items()}
+    output_pattern = {k: upt_dict(v, {"desc": k.split(outprefix)[1].split('.')[0],"trans":transform_type}) for k, v in output_pattern.items()}
 
     # Run the command
     res_dict =  run_cli_command(
@@ -87,7 +95,8 @@ def ants_registration(moving, fixed, outprefix='registered', **kwargs):
     tmp_dir = os.path.dirname(list(res_dict.keys())[0])
     trans_list = []
     for trans in ['0GenericAffine','1Warp']:
-        trans_list.append(opj(tmp_dir,trans))
+        if any([f for f in output_pattern if trans in f]):
+            trans_list.append(opj(tmp_dir,trans))
 
     trans_file = writeTransformSerie(moving, fixed,transform_list=trans_list)
     
@@ -104,8 +113,8 @@ def writeTransformSerie(moving_bidsfile, ref_bidsfile, transform_list, inverse_l
     output = transform_list[0].split('.')[0] + '.xml'
     print(output)
     # Get filename instead of full path
-    moving_image = moving_bidsfile.filename
-    ref_image = ref_bidsfile.filename
+    moving_image = moving_bidsfile.filename if isinstance(moving_bidsfile, ActiDepFile) else os.path.basename(moving_bidsfile)
+    ref_image = ref_bidsfile.filename if isinstance(ref_bidsfile, ActiDepFile) else os.path.basename(ref_bidsfile)
     transform_list = [os.path.basename(transform)
                       for transform in transform_list]
     if inverse_list is not None:
@@ -131,9 +140,9 @@ def writeTransformSerie(moving_bidsfile, ref_bidsfile, transform_list, inverse_l
     transform_dict['TransformList'] = transform_list
     transform_dict['InverseTransformList'] = inverse_list
     transform_dict['Reference'] = {'name': ref_image}
-    transform_dict['Reference']['entities'] = ref_bidsfile.get_full_entities()
+    transform_dict['Reference']['entities'] = ref_bidsfile.get_full_entities() if isinstance(ref_bidsfile, ActiDepFile) else {}
     transform_dict['Moving'] = {'name': moving_image}
-    transform_dict['Moving']['entities'] = moving_bidsfile.get_full_entities()
+    transform_dict['Moving']['entities'] = moving_bidsfile.get_full_entities() if isinstance(moving_bidsfile, ActiDepFile) else {}
     with open(output, 'w') as f:
         json.dump(transform_dict, f, indent=4)
     

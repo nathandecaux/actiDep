@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tract Visualization</title>
+    <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet" />
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .video-container { margin-bottom: 30px; }
+        h2 { color: #333; }
+    </style>
+</head>
+<body>
+    <h1>Tract Visualization Results</h1>
+
+    <div class="video-container">
+        <h2>Whole Brain</h2>
+        <video id="whole_brain" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_whole_brain.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>UFright</h2>
+        <video id="UFright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_UFright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>UFleft</h2>
+        <video id="UFleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_UFleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPREMright</h2>
+        <video id="TPREMright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPREMright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPREMleft</h2>
+        <video id="TPREMleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPREMleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPREFright</h2>
+        <video id="TPREFright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPREFright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPREFleft</h2>
+        <video id="TPREFleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPREFleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPRECright</h2>
+        <video id="TPRECright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPRECright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPRECleft</h2>
+        <video id="TPRECleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPRECleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPOSTCright</h2>
+        <video id="TPOSTCright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPOSTCright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPOSTCleft</h2>
+        <video id="TPOSTCleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPOSTCleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPARright</h2>
+        <video id="TPARright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPARright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TPARleft</h2>
+        <video id="TPARleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TPARleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TOCCright</h2>
+        <video id="TOCCright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TOCCright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>TOCCleft</h2>
+        <video id="TOCCleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_TOCCleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STRright</h2>
+        <video id="STRright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STRright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STRleft</h2>
+        <video id="STRleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STRleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPREMright</h2>
+        <video id="STPREMright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPREMright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPREMleft</h2>
+        <video id="STPREMleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPREMleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPREFright</h2>
+        <video id="STPREFright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPREFright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPREFleft</h2>
+        <video id="STPREFleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPREFleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPRECright</h2>
+        <video id="STPRECright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPRECright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPRECleft</h2>
+        <video id="STPRECleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPRECleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPOSTCright</h2>
+        <video id="STPOSTCright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPOSTCright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPOSTCleft</h2>
+        <video id="STPOSTCleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPOSTCleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPARright</h2>
+        <video id="STPARright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPARright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STPARleft</h2>
+        <video id="STPARleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STPARleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STOCCright</h2>
+        <video id="STOCCright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STOCCright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STOCCleft</h2>
+        <video id="STOCCleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STOCCleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STFOright</h2>
+        <video id="STFOright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STFOright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>STFOleft</h2>
+        <video id="STFOleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_STFOleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>SLFIright</h2>
+        <video id="SLFIright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_SLFIright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>SLFIleft</h2>
+        <video id="SLFIleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_SLFIleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>SLFIIright</h2>
+        <video id="SLFIIright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_SLFIIright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>SLFIIleft</h2>
+        <video id="SLFIIleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_SLFIIleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>SLFIIIright</h2>
+        <video id="SLFIIIright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_SLFIIIright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>SLFIIIleft</h2>
+        <video id="SLFIIIleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_SLFIIIleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>SCPright</h2>
+        <video id="SCPright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_SCPright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>SCPleft</h2>
+        <video id="SCPleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_SCPleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>POPTright</h2>
+        <video id="POPTright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_POPTright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>POPTleft</h2>
+        <video id="POPTleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_POPTleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>ORright</h2>
+        <video id="ORright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_ORright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>ORleft</h2>
+        <video id="ORleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_ORleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>MLFright</h2>
+        <video id="MLFright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_MLFright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>MLFleft</h2>
+        <video id="MLFleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_MLFleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>MCP</h2>
+        <video id="MCP" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_MCP.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>ILFright</h2>
+        <video id="ILFright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_ILFright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>ILFleft</h2>
+        <video id="ILFleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_ILFleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>IFOleft</h2>
+        <video id="IFOleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_IFOleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>ICPright</h2>
+        <video id="ICPright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_ICPright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>ICPleft</h2>
+        <video id="ICPleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_ICPleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>FXright</h2>
+        <video id="FXright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_FXright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>FXleft</h2>
+        <video id="FXleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_FXleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>FPTright</h2>
+        <video id="FPTright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_FPTright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>FPTleft</h2>
+        <video id="FPTleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_FPTleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CSTright</h2>
+        <video id="CSTright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CSTright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CSTleft</h2>
+        <video id="CSTleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CSTleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CGright</h2>
+        <video id="CGright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CGright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CGleft</h2>
+        <video id="CGleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CGleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CC7</h2>
+        <video id="CC7" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CC7.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CC6</h2>
+        <video id="CC6" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CC6.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CC5</h2>
+        <video id="CC5" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CC5.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CC4</h2>
+        <video id="CC4" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CC4.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CC3</h2>
+        <video id="CC3" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CC3.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CC2</h2>
+        <video id="CC2" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CC2.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CC1</h2>
+        <video id="CC1" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CC1.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>CA</h2>
+        <video id="CA" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_CA.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>ATRright</h2>
+        <video id="ATRright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_ATRright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>ATRleft</h2>
+        <video id="ATRleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_ATRleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>AFright</h2>
+        <video id="AFright" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_AFright.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <div class="video-container">
+        <h2>AFleft</h2>
+        <video id="AFleft" class="video-js vjs-default-skin" controls preload="auto" width="640" height="480" data-setup='{"fluid": true}'>
+            <source src="rotation_AFleft.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+
+    <script src="https://vjs.zencdn.net/7.20.3/video.min.js"></script>
+</body>
+</html>

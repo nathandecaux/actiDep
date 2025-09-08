@@ -45,6 +45,9 @@ from dipy.tracking.streamline import transform_streamlines
 from scipy.io import loadmat
 import nibabel as nib
 import pandas as pd
+from dipy.io.streamline import load_tractogram, load_trk
+import datetime
+from dipy.tracking.streamline import orient_by_streamline
 
 def _get_length_best_orig_peak(predicted_img, orig_img, x, y, z):
     predicted = predicted_img[x, y, z, :]       # 1 peak
@@ -58,8 +61,45 @@ def _get_length_best_orig_peak(predicted_img, orig_img, x, y, z):
     best_peak_len = np.linalg.norm(orig[argmax])
     return best_peak_len
 
+def reorient_streamlines(streamlines):
+    """
+    Reorient streamlines to have the same order of points, using dipy's orient_by_streamline.
+    Parameters
+    ----------
+    streamlines : list of Streamlines
+        List of streamlines to reorient.
+    Returns
+    -------
+    list of Streamlines
+        List of reoriented streamlines.
+    """
+    if len(streamlines) == 0:
+        return streamlines
+    # Use the longest streamline as the reference
+    longest_streamline = max(streamlines, key=len)
+    # Reorient all streamlines to match the longest streamline
+    reoriented_streamlines = orient_by_streamline(streamlines, longest_streamline)
+    return reoriented_streamlines
 
-def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=None, dilate=0, predicted_peaks=None,
+
+def orient_streamlines(streamlines):
+    oriented = []
+    for sl in streamlines:
+        if len(sl) == 0:
+            oriented.append(sl)
+            continue
+        if sl[0, 0] > sl[-1, 0]:
+            oriented.append(sl[::-1])
+        else:
+            oriented.append(sl)
+    return oriented
+
+def evaluate_along_streamlines(scalar_img,
+                               streamlines,
+                               nr_points,
+                               beginnings=None,
+                               dilate=0,
+                               predicted_peaks=None,
                                affine=None):
     # Runtime:
     # - default:                2.7s (test),    56s (all),      10s (test 4 bundles, 100 points)
@@ -69,36 +109,40 @@ def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=No
     # - AFQ:                      ?s (test),     ?s (all),      85s  (test 4 bundles, 100 points)
     # => AFQ a lot slower than others
 
-    streamlines = list(transform_streamlines(streamlines, np.linalg.inv(affine)))
+    streamlines = list(
+        transform_streamlines(streamlines, np.linalg.inv(affine)))
 
     if beginnings is not None:
-        for i in range(dilate):
-            beginnings = binary_dilation(beginnings)
-        beginnings = beginnings.astype(np.uint8)
-        streamlines = fiber_utils.orient_to_same_start_region(streamlines, beginnings)
+        streamlines = orient_streamlines(streamlines)
+        # for i in range(dilate):
+        #     beginnings = binary_dilation(beginnings)
+        # beginnings = beginnings.astype(np.uint8)
+        # streamlines = fiber_utils.orient_to_same_start_region(
+        #     streamlines, beginnings)
 
     if predicted_peaks is not None:
         # scalar img can also be orig peaks
-        best_orig_peaks = fiber_utils.get_best_original_peaks(predicted_peaks, scalar_img, peak_len_thr=0.00001)
+        best_orig_peaks = fiber_utils.get_best_original_peaks(
+            predicted_peaks, scalar_img, peak_len_thr=0.00001)
         scalar_img = np.linalg.norm(best_orig_peaks, axis=-1)
 
     algorithm = "distance_map"  # equal_dist | distance_map | cutting_plane | afq
 
-
     if algorithm == "equal_dist":
         ### Sampling ###
-        streamlines = fiber_utils.resample_fibers(streamlines, nb_points=nr_points)
+        streamlines = fiber_utils.resample_fibers(streamlines,
+                                                  nb_points=nr_points)
         values = map_coordinates(scalar_img, np.array(streamlines).T, order=1)
         ### Aggregation ###
         values_mean = np.array(values).mean(axis=1)
         values_std = np.array(values).std(axis=1)
         return values_mean, values_std
 
-
     if algorithm == "distance_map":  # cKDTree
 
         ### Sampling ###
-        streamlines = fiber_utils.resample_fibers(streamlines, nb_points=nr_points)
+        streamlines = fiber_utils.resample_fibers(streamlines,
+                                                  nb_points=nr_points)
         values = map_coordinates(scalar_img, np.array(streamlines).T, order=1)
 
         ### Aggregating by cKDTree approach ###
@@ -108,7 +152,9 @@ def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=No
         centroids = Streamlines(clusters.centroids)
         if len(centroids) > 1:
             print("WARNING: number clusters > 1 ({})".format(len(centroids)))
-        _, segment_idxs = cKDTree(centroids.get_data(), 1, copy_data=True).query(streamlines, k=1)  # (2000, 100)
+        _, segment_idxs = cKDTree(centroids.get_data(), 1,
+                                  copy_data=True).query(streamlines,
+                                                        k=1)  # (2000, 100)
 
         values_t = np.array(values).T  # (2000, 100)
 
@@ -123,8 +169,12 @@ def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=No
                 results_dict[segment_idxs[idx, jdx]].append(seg)
 
         if len(results_dict.keys()) < nr_points:
-            print("WARNING: found less than required points. Filling up with centroid values.")
-            centroid_values = map_coordinates(scalar_img, np.array([centroids[0]]).T, order=1)
+            print(
+                "WARNING: found less than required points. Filling up with centroid values."
+            )
+            centroid_values = map_coordinates(scalar_img,
+                                              np.array([centroids[0]]).T,
+                                              order=1)
             for i in range(nr_points):
                 if len(results_dict[i]) == 0:
                     results_dict[i].append(np.array(centroid_values).T[0, i])
@@ -142,7 +192,6 @@ def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=No
                 results_std.append(0)
         return results_mean, results_std
 
-
     elif algorithm == "cutting_plane":
         # This will resample all streamline to have equally distant points (resulting in a different number of points
         # in each streamline). Then the "middle" of the tract will be estimated taking the middle element of the
@@ -151,13 +200,16 @@ def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=No
         # all streamlines will be done by taking the mean for points with same indices.
 
         ### Sampling ###
-        streamlines = fiber_utils.resample_to_same_distance(streamlines, max_nr_points=nr_points)
+        streamlines = fiber_utils.resample_to_same_distance(
+            streamlines, max_nr_points=nr_points)
         # map_coordinates does not allow streamlines with different lengths -> use values_from_volume
-        values = np.array(values_from_volume(scalar_img, streamlines, affine=np.eye(4))).T
+        values = np.array(
+            values_from_volume(scalar_img, streamlines, affine=np.eye(4))).T
 
         ### Aggregating by Cutting Plane approach ###
         # Resample to all fibers having same number of points -> needed for QuickBundles
-        streamlines_resamp = fiber_utils.resample_fibers(streamlines, nb_points=nr_points)
+        streamlines_resamp = fiber_utils.resample_fibers(streamlines,
+                                                         nb_points=nr_points)
         metric = AveragePointwiseEuclideanMetric()
         qb = QuickBundles(threshold=100., metric=metric)
         clusters = qb.cluster(streamlines_resamp)
@@ -167,7 +219,8 @@ def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=No
         middle_idx = int(nr_points / 2)
         middle_point = centroids[0][middle_idx]
         # For each streamline get idx for the point which is closest to the middle
-        segment_idxs = fiber_utils.get_idxs_of_closest_points(streamlines, middle_point)
+        segment_idxs = fiber_utils.get_idxs_of_closest_points(
+            streamlines, middle_point)
 
         # Align along the middle and assign indices
         segment_idxs_eqlen = []
@@ -197,13 +250,16 @@ def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=No
 
         # If values missing fill up with centroid values
         if len(results_dict.keys()) < nr_points:
-            print("WARNING: found less than required points. Filling up with centroid values.")
+            print(
+                "WARNING: found less than required points. Filling up with centroid values."
+            )
             centroid_sl = [centroids[0]]
             centroid_sl = np.array(centroid_sl).T
             centroid_values = map_coordinates(scalar_img, centroid_sl, order=1)
             for idx, seg_idx in enumerate(range(min_idx, max_idx)):
                 if len(results_dict[seg_idx]) == 0:
-                    results_dict[seg_idx].append(np.array(centroid_values).T[0, idx])
+                    results_dict[seg_idx].append(
+                        np.array(centroid_values).T[0, idx])
 
         # Aggregate by mean
         results_mean = []
@@ -219,18 +275,23 @@ def evaluate_along_streamlines(scalar_img, streamlines, nr_points, beginnings=No
                 results_std.append(0)
         return results_mean, results_std
 
-
     elif algorithm == "afq":
         ### sampling + aggregation ###
-        streamlines = fiber_utils.resample_fibers(streamlines, nb_points=nr_points)
+        streamlines = fiber_utils.resample_fibers(streamlines,
+                                                  nb_points=nr_points)
         streamlines = Streamlines(streamlines)
         weights = dsa.gaussian_weights(streamlines)
-        results_mean = dsa.afq_profile(scalar_img, streamlines, affine=np.eye(4), weights=weights)
+        results_mean = dsa.afq_profile(scalar_img,
+                                       streamlines,
+                                       affine=np.eye(4),
+                                       weights=weights)
         results_std = np.zeros(nr_points)
         return results_mean, results_std
 
 
-def process_projection(tracto_dict, metric_dict, **kwargs):
+
+
+def process_projection(tracto_dict, metric_dict, beginnings_dict={}, **kwargs):
     """
     Process the projection of the streamlines in the bundlesegmentation tractography.
 
@@ -262,17 +323,25 @@ def process_projection(tracto_dict, metric_dict, **kwargs):
         # Load the reference image
         ref_img = nib.load(metric_dict[bundle_name].path)
         affine = ref_img.affine
+        beginnings = beginnings_dict.pop(bundle_name, None)
         scalar_img = ref_img.get_fdata()
         tracto_data = nib.streamlines.load(tracto.path).streamlines
+        beginnings = nib.load(beginnings.path).get_fdata() if beginnings is not None else None
+        
+        # If the tractography is in RAS space, flip the affine to LPS
+        # affine[0,:] = -affine[0, :]
+        # affine[1,:] = -affine[1, :]
         mean, std = evaluate_along_streamlines(scalar_img,
                                                tracto_data,
-                                               beginnings=None,
+                                               beginnings=beginnings,
                                                nr_points=nr_points,
                                                affine=affine,
                                                **kwargs)
 
         # Remove first and last segment as those tend to be more noisy
         mean = mean[1:-1]
+        #Convert nan to 0
+        mean = np.nan_to_num(mean, nan=0.0)
         std = std[1:-1]
 
         tractseg_bundle_name = bundle_name_dict[bundle_name]
@@ -287,7 +356,7 @@ def process_projection(tracto_dict, metric_dict, **kwargs):
 
     res_df.to_csv(os.path.join(temp_dir, 'projection.csv'), index=False)
 
-    ref_entities = metric_dict[bundle_name].get_full_entities()
+    ref_entities = metric_dict[list(tracto_dict.keys())[0]].get_full_entities()
     del ref_entities['bundle']
 
     csv_path = os.path.join(temp_dir, 'mean.csv')
@@ -339,7 +408,8 @@ def process_tractseg_analysis(
         subjects_txt,
         dataset_path="/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids",
         with_3dplot=False,
-        metric='FA'):
+        metric='FA',
+        pipeline='tractometry'):
     """
     Process the tractseg analysis for the given subjects.
 
@@ -416,7 +486,7 @@ def process_tractseg_analysis(
         print(f"Processing subject: {sub}")
         sub_id = sub.split('-')[-1]
         files = ds.get(sub_id,
-                       pipeline='bundle_seg',
+                       pipeline=pipeline,
                        suffix='mean',
                        metric=metric,
                        extension='csv')
@@ -440,7 +510,7 @@ def process_tractseg_analysis(
                                 pipeline='anima_preproc',
                                 suffix='mask',
                                 label='brain')[0]
-                                
+
             if len(bundles) == 0:
                 print(
                     f"No bundles found for subject {sub_id}. Skipping 3D plot."
@@ -493,9 +563,9 @@ def process_tractseg_analysis(
     cmd = [
         'plot_tractometry_results', '-i',
         os.path.join(temp_dir, 'subjects.txt'), '-o',
-        os.path.join(temp_dir, 'tractometry_results.png')
+        os.path.join(temp_dir, 'tractometry_results.png'),
+        "--save_csv",
     ]
-
     if with_3dplot:
         cmd += ['--plot3D', 'pval', '--tracking_format', 'tck']
     print(f"Running command: {' '.join(cmd)}")
@@ -503,7 +573,79 @@ def process_tractseg_analysis(
     print(
         f"Tractometry results saved to {os.path.join(temp_dir, 'tractometry_results.png')}"
     )
+    
+    # Create a timestamped folder in ~/Data/Tractometry/
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.expanduser(f"~/Data/Tractometry/tractometry_{timestamp}")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Copy the results to the output directory
+    shutil.copy(os.path.join(temp_dir, 'tractometry_results.png'), output_dir)
+    shutil.copy(os.path.join(temp_dir, 'subjects.txt'), output_dir)
+    
+    # Create a JSON file with the parameters
+    params = {
+        "timestamp": timestamp,
+        "metric": metric,
+        "with_3dplot": with_3dplot,
+        "dataset_path": dataset_path,
+        "temp_dir": temp_dir,
+        "subjects_file": subjects_txt,
+        "command": " ".join(cmd)
+    }
+    
+    with open(os.path.join(output_dir, 'parameters.json'), 'w') as f:
+        json.dump(params, f, indent=4)
+    
+    print(f"Results saved to {output_dir}")
 
 
 if __name__ == "__main__":
-    process_tractseg_analysis("/home/ndecaux/Code/actiDep/subjects.txt",metric='AD',with_3dplot=True)
+    process_tractseg_analysis("/home/ndecaux/Code/actiDep/subjects.txt",metric='FA',with_3dplot=False,pipeline='hcp_association_tractseg')
+
+
+    # sub = Subject('03005',db_root='/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+    # fa = sub.get_unique(pipeline='mcm_tensors_staniz',desc='cleaned',metric='FA',extension='nii.gz',bundle='UFright')
+    # tracto = sub.get_unique(pipeline='bundle_seg',bundle='UFright',suffix='tracto',extension='trk')
+    # print(fa.path, tracto.path)
+    # fa_nii = nib.load(fa.path)
+    # fa_img= fa_nii.get_fdata()
+    # affine = fa_nii.affine
+
+    # # Use dipy's load_tractogram to load the streamlines
+    # tractogram = load_trk(tracto.path, 'same', bbox_valid_check=False)
+    # tracto_data = tractogram.streamlines
+
+    # #Print the affine in the tractogram header
+    # print("Affine in tractogram header:")
+    # print(tractogram.affine)
+    # # Print the affine in the fa_nii header
+    # print("Affine in fa_nii header:")
+    # print(fa_nii.affine)
+    
+
+    # fa = sub.get_unique(pipeline='mcm_tensors_staniz',desc='cleaned',metric='FA',extension='nii.gz',bundle='ATRleft')
+    # tracto = sub.get_unique(pipeline='bundle_seg',bundle='ATRleft',suffix='tracto',extension='trk')
+    # print(fa.path, tracto.path)
+    # fa_nii = nib.load(fa.path)
+    # fa_img= fa_nii.get_fdata()
+    # affine = fa_nii.affine
+
+    # # Use dipy's load_tractogram to load the streamlines
+    # tractogram = load_trk(tracto.path, 'same', bbox_valid_check=False)
+    # tracto_data = tractogram.streamlines
+
+    # #Print the affine in the tractogram header
+    # print("Affine in tractogram header:")
+    # print(tractogram.affine)
+    # # Print the affine in the fa_nii header
+    # print("Affine in fa_nii header:")
+    # print(fa_nii.affine)
+    
+    # #Flip affine in z
+    # affine[0,:] = -affine[0, :]
+    # affine[1,:] = -affine[1, :]
+
+  
+
+    # print(evaluate_along_streamlines(fa_img, tracto_data, nr_points=100, affine=affine))

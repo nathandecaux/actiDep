@@ -1,3 +1,7 @@
 numpy
 pandas
 requests
+flask
+flask-bootstrap
+holoviews
+bokeh

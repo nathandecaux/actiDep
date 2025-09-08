@@ -327,7 +327,8 @@ def upt_dict(dct, new_items=None, **kwargs):
     # Traiter le dictionnaire positionnel s'il existe
     if new_items and isinstance(new_items, dict):
         d.update(new_items)
-        
+
+
     # Traiter les arguments nommés comme avant
     for key, value in kwargs.items():
         if isinstance(value, dict):
@@ -337,6 +338,8 @@ def upt_dict(dct, new_items=None, **kwargs):
                 d[key] = value
             else:
                 raise ValueError("Empty key. Please provide only named arguments.")
+    
+    print(d)
     return d
 
 def create_pipeline_description(pipeline, layout,**kwargs):
@@ -407,3 +410,4 @@ def add_kwargs_to_cli(command,**kwargs):
                 else :
                     command = command + [f"-{key.replace('-','')}", str(value)]
         return command
+

@@ -14,7 +14,6 @@ setup(
         'pandas',
         'numpy',
         'matplotlib',
-        # Ajoutez d'autres dépendances selon vos besoins
     ],
     classifiers=[
         'Programming Language :: Python :: 3',

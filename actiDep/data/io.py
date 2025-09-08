@@ -264,6 +264,20 @@ def copy_list(dest, file_list):
         else:
             shutil.copy(src_path, dest)
 
+
+    
+def remove_temp_dir(res_dict):
+    """
+    Remove the temporary directory of the result dictionary.
+    """
+
+    if not res_dict:
+        return
+    first_key = list(res_dict.keys())[0]
+    temp_dir = str(pathlib.Path(first_key).parent)
+    shutil.rmtree(temp_dir)
+    
+
 def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False, **kwargs):
     """
     Copy files from a dictionary to the BIDS dataset.
@@ -277,13 +291,14 @@ def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False, **kwargs):
     }
     """
     mapping={}
+    #Drop original_name entitie if it is in kwargs
     #drop pipeline if in kwargs and is not None
-    if 'pipeline' in kwargs and kwargs['pipeline'] is not None:
+    if 'pipeline' in kwargs and pipeline is not None:
         del kwargs['pipeline']
     
     for src_file, entities in file_dict.items():
         entities.update(kwargs)
-        if 'pipeline' in entities and pipeline is not None:
+        if 'pipeline' in entities.keys() and pipeline is not None:
             del entities['pipeline']
         dest_file = subject.build_path(
             original_name=os.path.basename(src_file), **entities, pipeline=pipeline)
@@ -292,4 +307,6 @@ def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False, **kwargs):
         else:
             print(f"Copying {src_file} to {dest_file}")
         mapping[src_file] = dest_file
+    
+    remove_temp_dir(file_dict)
     return mapping
