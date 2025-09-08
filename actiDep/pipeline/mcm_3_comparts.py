@@ -81,25 +81,18 @@ def mcm_to_bundleseg_tracts(subject, pipeline, bundle_name, **kwargs):
     kwargs : dict
         Additional keyword arguments for processing
     """
-
-    if 'overwrite' in kwargs:
-        overwrite = kwargs.pop('overwrite')
-    else:
-        overwrite = False
     mcm_file = subject.get_unique(extension='mcmx', pipeline=pipeline)
     reference = subject.get(
         metric='FA', pipeline='anima_preproc', datatype='dwi', extension='nii.gz')[0]
 
     if bundle_name == "ALL":
         bundle_list = list(get_HCP_bundle_names().keys())
-    elif isinstance(bundle_name, list):
-        bundle_list = bundle_name
     else:
         bundle_list = [bundle_name]
 
     already_done = subject.get(suffix='tracto',
-                               desc='cleaned',pipeline=pipeline, extension='vtk')
-    if len(already_done) > 0 and not overwrite:
+                               metric='FA',pipeline=pipeline, extension='nii.gz')
+    if len(already_done) > 0:
         already_done = [subject.get_full_entities()['bundle'] for subject in already_done]
         print(f"Already done: {already_done}")
         bundle_list = list(set(bundle_list) - set(already_done))
@@ -206,7 +199,7 @@ def process_mcm_pipeline(subject, pipeline='mcm_tensors'):
                                                          opt=CLIArg(
                                                              'optimizer', 'levenberg')
                                                          ),
-        'mcm_to_bundleseg_tracts': lambda: mcm_to_bundleseg_tracts(subject, pipeline, bundle_name=['CC4','CC5','CC6'],overwrite=True),
+        'mcm_to_bundleseg_tracts': lambda: mcm_to_bundleseg_tracts(subject, pipeline, bundle_name='ALL'),
     }
 
     for step in pipeline_list:

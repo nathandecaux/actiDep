@@ -9,7 +9,3 @@ subjects.txt
 ist
 output_subplots
 *.pdf
-*.nii.gz
-build/
-dist/
-actiDep.egg-info/SOURCES.txt

@@ -43,22 +43,11 @@ class ActiDepFile:
         # Extraire les entités du nom de fichier
         self.entities = parse_filename(self.filename)
         
-        # Ajouter l'entité 'subject'
-        # Si self.subject_obj existe, utiliser son sub_id, sinon essayer de l'extraire des entités ou du chemin
-        if self.subject_obj is not None and hasattr(self.subject_obj, 'sub_id'):
-            self.entities['subject'] = self.subject_obj.sub_id
-        elif 'sub' in self.entities:
-            self.entities['subject'] = self.entities['sub']
-        else:
-            # Essayer d'extraire l'ID du sujet du chemin (ex: .../sub-XXXXX/...)
-            match = re.search(r'sub-(\w+)', path)
-            if match:
-                self.entities['subject'] = match.group(1)
-        
         # Ajouter l'extension comme entité supplémentaire, en s'assurant qu'elle commence par '.'
         # et gère correctement les extensions composées (ex: .nii.gz).
         if '.' in self.filename:
             first_dot_index = self.filename.find('.')
+            # first_dot_index sera différent de -1 ici car nous avons vérifié '.' in self.filename
             self.entities['extension'] = self.filename[first_dot_index:]
         # Si le nom de fichier n'a pas de point, l'entité 'extension' n'est pas définie ou modifiée par ce bloc.
         
@@ -115,7 +104,7 @@ class ActiDepFile:
             return Subject(self.entities.get('sub'))
     
     def __str__(self):
-        print(self.path+'\n')
+        return self.path
     
     def __eq__(self, other):
         if isinstance(other, str):
@@ -302,7 +291,6 @@ class Subject:
         if len(files) > 1:
             raise ValueError(f"Plusieurs fichiers trouvés pour {kwargs}")
         return files[0]
-    
     
     def build_path(self, suffix, pipeline=None, scope=None, original_name=None, is_dir=False, **kwargs):
         """

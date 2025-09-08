@@ -233,7 +233,6 @@ def generate_trekker_tracto_tck(odf, seeds, n_seeds=1000, **kwargs):
 def _find_tractogram_endings(tractogram, reference):
     """
     Get the endings segmentation of the streamlines in the tractogram.
-    Ensures all tracts are oriented in the same direction.
 
     Parameters
     ----------
@@ -246,12 +245,10 @@ def _find_tractogram_endings(tractogram, reference):
     Returns
     -------
     endings : dict
-        Dictionary containing the start and end binary masks of the streamlines in the tractogram.
+        Dictionary containing the start and end segmentations of the streamlines in the tractogram.
     """
     # Load reference image
     import nibabel as nib
-    from dipy.tracking.streamline import orient_by_streamline
-    
     ref_img = nib.load(reference)
     shape = ref_img.shape
     affine = ref_img.affine
@@ -259,35 +256,19 @@ def _find_tractogram_endings(tractogram, reference):
     # Ensure tractogram is in the correct space
     tractogram.to_space(Space.RASMM)
     
-    # Create empty binary volumes for start and end points
-    start_volume = np.zeros(shape)
-    end_volume = np.zeros(shape)
-    
-    # Get streamlines from tractogram
-    streamlines = tractogram.streamlines
-    
-    # Check if we have valid streamlines
-    if len(streamlines) == 0:
-        start_img = nib.Nifti1Image(start_volume.astype('uint8'), affine)
-        end_img = nib.Nifti1Image(end_volume.astype('uint8'), affine)
-        return {'start': start_img, 'end': end_img}
-    
-    # Find the longest streamline to use as standard for orientation
-    lengths = [len(s) for s in streamlines]
-    standard_idx = np.argmax(lengths)
-    standard = streamlines[standard_idx]
-    
-    # Orient all streamlines to match the standard
-    oriented_streamlines = orient_by_streamline(streamlines, standard, n_points=12, in_place=False)
+    # Create empty volumes for start and end points
+    start_volume = np.zeros(shape, dtype=np.int32)
+    end_volume = np.zeros(shape, dtype=np.int32)
     
     # Get the inverse affine to convert from mm to voxel coordinates
     inv_affine = np.linalg.inv(affine)
-    # Process each oriented streamline
-    for streamline in oriented_streamlines:
+    
+    # Convert streamline endpoints to voxel coordinates
+    for streamline in tractogram.streamlines:
         if len(streamline) < 2:
             continue
             
-        # Get the start and end points of the oriented streamline
+        # Get the start and end points of the streamline
         start_point = streamline[0]
         end_point = streamline[-1]
         
@@ -295,20 +276,20 @@ def _find_tractogram_endings(tractogram, reference):
         start_voxel = np.round(nib.affines.apply_affine(inv_affine, start_point)).astype(int)
         end_voxel = np.round(nib.affines.apply_affine(inv_affine, end_point)).astype(int)
         
-        # Check if points are within volume bounds and set binary mask
+        # Check if points are within volume bounds
         if (0 <= start_voxel[0] < shape[0] and 
             0 <= start_voxel[1] < shape[1] and 
             0 <= start_voxel[2] < shape[2]):
-            start_volume[start_voxel[0], start_voxel[1], start_voxel[2]] = 1
+            start_volume[start_voxel[0], start_voxel[1], start_voxel[2]] += 1
             
         if (0 <= end_voxel[0] < shape[0] and 
             0 <= end_voxel[1] < shape[1] and 
             0 <= end_voxel[2] < shape[2]):
-            end_volume[end_voxel[0], end_voxel[1], end_voxel[2]] = 1
+            end_volume[end_voxel[0], end_voxel[1], end_voxel[2]] += 1
     
-    # Create NIfTI images with binary masks
-    start_img = nib.Nifti1Image((start_volume>0).astype('uint8'), affine)
-    end_img = nib.Nifti1Image((end_volume>0).astype('uint8'), affine)
+    # Create NIfTI images
+    start_img = nib.Nifti1Image(start_volume, affine)
+    end_img = nib.Nifti1Image(end_volume, affine)
     
     return {'start': start_img, 'end': end_img}
 
@@ -364,16 +345,6 @@ def get_tractogram_endings(tractogram_file, reference):
     }
     
     return result_dict
-
-def surface_projection(tractogram, surface, output_file, **kwargs):
-    """
-    Project the streamlines onto a surface.
-
-    Parameters
-    ----------
-    """
-    return True
-    
 
 
 if __name__ == "__main__":

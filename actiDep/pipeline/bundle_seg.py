@@ -7,7 +7,6 @@ from actiDep.utils.recobundle import register_template_to_subject, call_recobund
 from actiDep.utils.tractography import get_tractogram_endings
 from actiDep.analysis.tractometry import process_projection
 import multiprocessing
-import tempfile
 
 
 def init_pipeline(subject, pipeline, **kwargs):
@@ -64,7 +63,7 @@ def run_bundleseg(subject, pipeline, atlas_name='SCIL', **kwargs):
 
     # Load the whole brain tractography
     anat = subject.get_unique(metric='FA', pipeline='anima_preproc', extension='nii.gz')
-    tracto = subject.get_unique(suffix='tracto', pipeline='msmt_csd', label='brain',algo='ifod2',extension='trk')
+    tracto = subject.get_unique(suffix='tracto', pipeline='msmt_csd', label='brain',desc='normalized',algo='ifod2',extension='tck')
     print(tracto)
     # Register the anatomical image to the template space
     process_bundleseg(tracto, anat, atlas_dir='/home/ndecaux/Data/Atlas')
@@ -114,7 +113,7 @@ def get_bundleseg_endings(subject, pipeline):
     for bundle in bundle_list:
         try :
             bundle_name = bundle.get_full_entities()['bundle']
-            if False:# bundle_name in already_done:
+            if bundle_name in already_done:
                 print(f"Bundle {bundle_name} already processed, skipping")
                 continue
             print(f"Processing bundle {bundle_name}")
@@ -155,12 +154,6 @@ def project_metric_onto_bundleseg(subject, pipeline, metric_name, **kwargs):
         x.get_full_entities()['bundle']:x for x in metric_list
     }
 
-    beginnings_dict = subject.get(suffix='mask', datatype='endings',
-                                  label='start')
-    beginnings_dict = {
-        x.get_full_entities()['bundle']:x for x in beginnings_dict if x.get_full_entities()['bundle'] in metric_dict.keys()
-    }
-
     #Remove bundle from bundle_list if not in metric_list
     bundle_dict = {
         x.get_full_entities()['bundle']:x for x in bundle_list
@@ -170,7 +163,7 @@ def project_metric_onto_bundleseg(subject, pipeline, metric_name, **kwargs):
     print(f'Starting projection of {len(bundle_dict)} bundles with metric {metric_name}')
 
     # Project the metric onto the bundlesegmentation tractography
-    res_dict = process_projection(bundle_dict, metric_dict, beginnings_dict, **kwargs)
+    res_dict = process_projection(bundle_dict, metric_dict, **kwargs)
 
     copy_from_dict(subject,
                    res_dict,
@@ -197,15 +190,15 @@ def segment_subject_bundleseg(subject,pipeline='recobundle_segmentation', **kwar
         # 'init',
         # 'run_bundleseg',
         # 'get_bundleseg_endings',
-        # "project_metric_onto_bundleseg"
+        "project_metric_onto_bundleseg"
     ]
 
     # Process each requested pipeline step
     step_mapping = {
         'init': lambda: init_pipeline(subject, pipeline),
         'run_bundleseg': lambda: run_bundleseg(subject, pipeline, atlas_name='SCIL', **kwargs),
-        'get_bundleseg_endings': lambda: get_bundleseg_endings(subject, pipeline, **kwargs),
-        'project_metric_onto_bundleseg': lambda: project_metric_onto_bundleseg(subject, pipeline, metric_name='IFW', **kwargs),
+        'get_bundleseg_endings': lambda: get_bundleseg_endings(subject, pipeline, bundle_name='IFOD2', **kwargs),
+        'project_metric_onto_bundleseg': lambda: project_metric_onto_bundleseg(subject, pipeline, metric_name='AD', **kwargs),
     }
 
     for step in pipeline_list:
@@ -231,15 +224,12 @@ def process_single_subject(arg):
 
 if __name__ == "__main__":
     pipeline = 'bundle_seg'
-    num_processes = 1
-
-    if os.uname()[1] == 'calcarine':
-        num_processes = 32
-        print("calcarine")
-        # tempfile.tempdir = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bundle_seg'
-        tempfile.tempdir = '/local/ndecaux/bundle_seg'
-        #also set the TMPDIR env variable
-        os.environ['TMPDIR'] = tempfile.tempdir
+    # if os.uname()[1] == 'calcarine':
+    #     print("calcarine")
+    #     # tempfile.tempdir = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bundle_seg'
+    #     tempfile.tempdir = '/local/ndecaux/bundle_seg'
+    #     #also set the TMPDIR env variable
+    #     os.environ['TMPDIR'] = tempfile.tempdir
     # else:
     #     #Tempdir on home
     #     tempfile.tempdir = os.path.join(os.path.expanduser('~'), 'bundle_seg')
@@ -249,17 +239,13 @@ if __name__ == "__main__":
     config, tools = set_config()
     # subject = Subject('100206',db_root='/home/ndecaux/Data/HCP/')
 
-    # dataset_path = '/home/ndecaux/Code/Data/comascore'
     dataset_path = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids'
+
     ds = Actidep(dataset_path)
-    # sub= Subject('00001',db_root=dataset_path)
 
-    # run_bundleseg(sub, pipeline=pipeline, atlas_name='SCIL')
+    # sub = Subject('01002', db_root=dataset_path)
 
-
-    # # sub = Subject('01002', db_root=dataset_path)
-
-    # # project_metric_onto_bundleseg(sub, pipeline=pipeline, metric_name='FA')
+    # project_metric_onto_bundleseg(sub, pipeline=pipeline, metric_name='FA')
 
     args = [(sub, pipeline) for sub in ds.subject_ids]
     args_filtered = []
@@ -278,8 +264,8 @@ if __name__ == "__main__":
     print(f"Found {len(args)} subjects to process")
 
 
-    # # Définir le nombre de processus (ajustez selon les ressources disponibles)
-    #multiprocessing.cpu_count() - 1  # Laisse un CPU libre
+    # Définir le nombre de processus (ajustez selon les ressources disponibles)
+    num_processes = 40#multiprocessing.cpu_count() - 1  # Laisse un CPU libre
 
     # Pour exécuter en séquentiel (commentez les lignes multiprocessing ci-dessous)
     # for arg in args:
