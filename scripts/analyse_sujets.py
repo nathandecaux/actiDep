@@ -9,7 +9,7 @@ import numpy as np
 from scipy import stats
 
 # Lire les lignes du fichier
-with open('subjects.txt', 'r') as f:
+with open('/home/ndecaux/Code/actiDep/scripts/subjects.txt', 'r') as f:
     lines = f.readlines()
 
 # Trouver la ligne d'en-tête

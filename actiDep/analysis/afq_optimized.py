@@ -1,134 +1,87 @@
 import numpy as np
-from scipy.stats import t as student_t
+import scipy.stats
 
-def _welch_t(group0, group1):
-    """
-    group0, group1: arrays shape (n0, p), (n1, p)
-    Retourne t (p,), df (p,)
-    """
-    n0 = group0.shape[0]
-    n1 = group1.shape[0]
-    mean0 = group0.mean(axis=0)
-    mean1 = group1.mean(axis=0)
-    var0 = group0.var(axis=0, ddof=1)
-    var1 = group1.var(axis=0, ddof=1)
-    denom = np.sqrt(var0 / n0 + var1 / n1)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        t = (mean1 - mean0) / denom
-    # Welch df
-    a = var0 / n0
-    b = var1 / n1
-    with np.errstate(divide='ignore', invalid='ignore'):
-        df = (a + b) ** 2 / ((a**2) / (n0 - 1) + (b**2) / (n1 - 1))
-    return t, df
 
-def _p_from_t(t, df):
-    # Bilatéral
-    with np.errstate(over='ignore', invalid='ignore'):
-        p = 2 * student_t.sf(np.abs(t), df)
-    return p
+def _corr_vectorized(a, b):
+    """
+    Vectorized correlation of a with each column of b.
+    Faster than looping over scipy.stats.pearsonr.
+    """
+    a = np.asarray(a)
+    b = np.asarray(b)
 
-def _perm_min_p_group(X, y, nperm, rng):
-    """
-    X: (n, p), y: binaire (0/1)
-    Retourne distribution des min p (nperm,)
-    """
-    n, p = X.shape
-    idx = np.arange(n)
-    n1 = int(y.sum())
-    n0 = n - n1
-    # Préallocation
-    min_p = np.empty(nperm, dtype=float)
-    for k in range(nperm):
-        rng.shuffle(idx)  # in-place
-        mask1 = y[idx].astype(bool)  # permuter étiquettes via réindexation
-        # plus rapide: sélectionner lignes
-        g1 = X[mask1]
-        g0 = X[~mask1]
-        t, df = _welch_t(g0, g1)
-        pvals = _p_from_t(t, df)
-        min_p[k] = np.nanmin(pvals)
-    return min_p
+    a_mean = a.mean()
+    b_mean = b.mean(axis=0)
 
-def _perm_min_p_corr(X, y, nperm, rng):
-    """
-    X: (n, p), y: continu
-    Distribution des min p sous permutation de y.
-    """
-    n, p = X.shape
-    Xc = X - X.mean(axis=0, keepdims=True)
-    sx = Xc.std(axis=0, ddof=1)
-    yc = y - y.mean()
-    sy = yc.std(ddof=1)
-    denom = (n - 1) * sx * sy
-    min_p = np.empty(nperm, dtype=float)
-    idx = np.arange(n)
-    for k in range(nperm):
-        rng.shuffle(idx)
-        yp = y[idx]
-        ypc = yp - yp.mean()
-        r = (ypc @ Xc) / denom
-        # Convertir en t
-        with np.errstate(divide='ignore', invalid='ignore'):
-            t = r * np.sqrt((n - 2) / np.clip(1 - r**2, 1e-15, None))
-        pvals = 2 * student_t.sf(np.abs(t), n - 2)
-        min_p[k] = np.nanmin(pvals)
-    return min_p
+    num = np.sum((a[:, None] - a_mean) * (b - b_mean), axis=0)
+    den = np.sqrt(np.sum((a - a_mean) ** 2) * np.sum((b - b_mean) ** 2, axis=0))
 
-def AFQ_MultiCompCorrection(X, y, alpha, nperm=5000, seed=None):
-    """
-    Implémentation optimisée (vectorisation + permutations en place) de la correction multi-comparaisons.
-    Paramètres:
-      X: ndarray (subjects, points)
-      y: ndarray (subjects,) (binaire pour test de groupe ou continu pour corrélation)
-      alpha: niveau alpha global
-      nperm: nb permutations (inchangé)
-      seed: optionnel pour reproductibilité
-    Retour:
-      alphaFWE: seuil p (pointwise) contrôlant FWE
-      statFWE: None (réservé compat)
-      clusterFWE: np.nan (non utilisé ici)
-      stats: dictionnaire {'t': ..., 'p': ...} ou {'r': ..., 't': ..., 'p': ...}
-    Remarque:
-      clusterFWE non estimé (get_significant_areas est appelé avec cluster_size=1 dans ce pipeline).
-    """
-    X = np.asarray(X, dtype=float)
-    y = np.asarray(y)
-    n, p = X.shape
-    rng = np.random.default_rng(seed)
+    r = num / den
+    r = np.clip(r, -1.0, 1.0)  # numerical stability
 
-    unique_y = np.unique(y[~np.isnan(y)])
-    is_group = (unique_y.size == 2) and set(unique_y) <= {0,1}
+    # Compute p-values for Pearson correlation
+    n = len(a)
+    df = n - 2
+    t = r * np.sqrt(df / (1 - r**2))
+    p = 2 * scipy.stats.t.sf(np.abs(t), df)
 
-    if is_group:
-        # Stat réel
-        g1 = X[y == 1]
-        g0 = X[y == 0]
-        t_real, df_real = _welch_t(g0, g1)
-        p_real = _p_from_t(t_real, df_real)
-        # Distribution min p
-        min_p_dist = _perm_min_p_group(X, y, nperm, rng)
-        alphaFWE = np.quantile(min_p_dist, alpha)
-        stats = {'t': t_real, 'p': p_real, 'df': df_real}
+    return r, p
+
+
+def AFQ_MultiCompCorrection(data=None, y=None, alpha=0.05, cThresh=None, nperm=1000):
+    """
+    Optimized permutation-based multiple comparison correction.
+    """
+    if cThresh is None:
+        cThresh = alpha
+
+    n, m = data.shape
+
+    if y is None or len(y) == 0:
+        y = np.random.randn(n)
+        print('No behavioral data provided so randn will be used')
+        stattest = 'corr'
     else:
-        # Corrélation
-        n_eff = n - np.isnan(y).sum()
-        X_valid = X
-        y_valid = y
-        # Centrage
-        Xc = X_valid - X_valid.mean(axis=0, keepdims=True)
-        sx = Xc.std(axis=0, ddof=1)
-        yc = y_valid - y_valid.mean()
-        sy = yc.std(ddof=1)
-        denom = (n - 1) * sx * sy
-        r_real = (yc @ Xc) / denom
-        with np.errstate(divide='ignore', invalid='ignore'):
-            t_real = r_real * np.sqrt((n - 2) / np.clip(1 - r_real**2, 1e-15, None))
-        p_real = 2 * student_t.sf(np.abs(t_real), n - 2)
-        min_p_dist = _perm_min_p_corr(X_valid, y_valid, nperm, rng)
-        alphaFWE = np.quantile(min_p_dist, alpha)
-        stats = {'r': r_real, 't': t_real, 'p': p_real, 'df': n - 2}
+        y = np.asarray(y)
+        if np.array_equal(np.unique(y), [0, 1]):
+            stattest = 'ttest'
+        else:
+            stattest = 'corr'
 
-    clusterFWE = np.nan
-    statFWE = None
+    p = np.zeros((nperm, m))
+    stat = np.zeros((nperm, m))
+    clusMax = np.zeros(nperm)
+    stats = {}
+
+    rng = np.random.default_rng()
+
+    if stattest == 'corr':
+        for ii in range(nperm):
+            rows = rng.permutation(n)
+            stat[ii, :], p[ii, :] = _corr_vectorized(y, data[rows, :])
+
+    else:  # independent t-test
+        for ii in range(nperm):
+            perm = rng.permutation(y)
+            mask = perm > 0
+            ttest_res = scipy.stats.ttest_ind(data[mask, :], data[~mask, :], axis=0, equal_var=False)
+            p[ii, :] = ttest_res.pvalue
+            stat[ii, :] = ttest_res.statistic
+
+    # Sort results
+    stats["pMin"] = np.sort(p.min(axis=1))
+    stats["statMax"] = np.sort(stat.max(axis=1))[::-1]
+    alphaFWE = stats["pMin"][int(round(alpha * nperm))]
+    statFWE = stats["statMax"][int(round(alpha * nperm))]
+
+    # Cluster correction
+    pThresh = p < cThresh
+    for ii in range(nperm):
+        arr = np.r_[0, pThresh[ii, :].astype(int), 0]
+        clusSiz = np.diff(np.flatnonzero(arr == 0))
+        clusMax[ii] = clusSiz.max() if len(clusSiz) > 0 else 0
+
+    stats["clusMax"] = np.sort(clusMax)[::-1]
+    clusterFWE = stats["clusMax"][int(round(alpha * nperm))]
+
     return alphaFWE, statFWE, clusterFWE, stats

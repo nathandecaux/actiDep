@@ -15,7 +15,6 @@ from dipy.tracking.streamline import transform_streamlines
 from dipy.tracking.streamline import values_from_volume
 import dipy.stats.analysis as dsa
 
-from tractseg.libs import fiber_utils
 
 
 #### Custom imports ####

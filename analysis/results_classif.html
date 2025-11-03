@@ -1,0 +1,190 @@
+<h2>Apathique vs non apathique</h2>
+<hr>
+<h3>Significativité des différences (test de Student) :</h3>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>feature</th>
+      <th>t</th>
+      <th>p</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>acti_freq_mean_12h_3</td>
+      <td>2.148410</td>
+      <td>0.042457</td>
+    </tr>
+    <tr>
+      <td>acti_freq_mean_12h_6</td>
+      <td>2.904235</td>
+      <td>0.007856</td>
+    </tr>
+    <tr>
+      <td>acti_inactivity_min_12h_6</td>
+      <td>-2.121524</td>
+      <td>0.042715</td>
+    </tr>
+    <tr>
+      <td>acti_oadl_fft_mean_12h_3</td>
+      <td>2.842940</td>
+      <td>0.009364</td>
+    </tr>
+    <tr>
+      <td>acti_activity_rate_3d</td>
+      <td>2.100052</td>
+      <td>0.049414</td>
+    </tr>
+  </tbody>
+</table>
+<br>
+<h3>Scores moyens (%) :</h3>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>model</th>
+      <th>accuracy</th>
+      <th>precision</th>
+      <th>recall</th>
+      <th>f1</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MLP</td>
+      <td>62.9</td>
+      <td>58.7</td>
+      <td>58.0</td>
+      <td>57.7</td>
+    </tr>
+    <tr>
+      <td>DT</td>
+      <td>65.5</td>
+      <td>63.2</td>
+      <td>59.7</td>
+      <td>59.7</td>
+    </tr>
+    <tr>
+      <td>RF</td>
+      <td>65.7</td>
+      <td>60.4</td>
+      <td>57.8</td>
+      <td>56.6</td>
+    </tr>
+    <tr>
+      <td>GBM</td>
+      <td>62.7</td>
+      <td>58.6</td>
+      <td>57.6</td>
+      <td>57.4</td>
+    </tr>
+    <tr>
+      <td>Ada</td>
+      <td>60.1</td>
+      <td>57.6</td>
+      <td>57.8</td>
+      <td>57.3</td>
+    </tr>
+  </tbody>
+</table>
+<br><br>
+<h2>Dépressif vs non dépressif</h2>
+<hr>
+<h3>Significativité des différences (test de Student) :</h3>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>feature</th>
+      <th>t</th>
+      <th>p</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>acti_walk_fft_mean_12h_3</td>
+      <td>-2.145574</td>
+      <td>0.036247</td>
+    </tr>
+    <tr>
+      <td>acti_freq_min_12h_3</td>
+      <td>3.004210</td>
+      <td>0.003956</td>
+    </tr>
+    <tr>
+      <td>acti_oadl_fft_mean_12h_1</td>
+      <td>2.290634</td>
+      <td>0.031345</td>
+    </tr>
+    <tr>
+      <td>acti_activity_mean_12h_3</td>
+      <td>-2.256323</td>
+      <td>0.030702</td>
+    </tr>
+    <tr>
+      <td>acti_oadl_max_12h_3</td>
+      <td>-2.468077</td>
+      <td>0.019371</td>
+    </tr>
+    <tr>
+      <td>acti_oadl_mean_12h_3</td>
+      <td>-2.527987</td>
+      <td>0.017640</td>
+    </tr>
+    <tr>
+      <td>acti_freq_min_3d</td>
+      <td>2.112013</td>
+      <td>0.039315</td>
+    </tr>
+  </tbody>
+</table>
+<br>
+<h3>Scores moyens (%) :</h3>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>model</th>
+      <th>accuracy</th>
+      <th>precision</th>
+      <th>recall</th>
+      <th>f1</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MLP</td>
+      <td>52.6</td>
+      <td>52.8</td>
+      <td>52.9</td>
+      <td>52.1</td>
+    </tr>
+    <tr>
+      <td>DT</td>
+      <td>67.6</td>
+      <td>66.6</td>
+      <td>66.2</td>
+      <td>66.3</td>
+    </tr>
+    <tr>
+      <td>RF</td>
+      <td>72.9</td>
+      <td>73.5</td>
+      <td>69.3</td>
+      <td>69.7</td>
+    </tr>
+    <tr>
+      <td>GBM</td>
+      <td>66.0</td>
+      <td>66.2</td>
+      <td>66.8</td>
+      <td>65.7</td>
+    </tr>
+    <tr>
+      <td>Ada</td>
+      <td>62.6</td>
+      <td>60.5</td>
+      <td>59.4</td>
+      <td>59.2</td>
+    </tr>
+  </tbody>
+</table>
+<br><br>

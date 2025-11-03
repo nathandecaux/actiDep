@@ -213,9 +213,10 @@ def generate_trekker_tracto_tck(odf, seeds, n_seeds=1000, **kwargs):
     ]
 
     output_patterns = {
-        "tracto.vtk": {
+        "tracto.tck": {
             "suffix": "tracto",
             "datatype": "tracto",
+            'algo': 'trekker',
             "extension": "tck"
         }
     }
@@ -373,7 +374,115 @@ def surface_projection(tractogram, surface, output_file, **kwargs):
     ----------
     """
     return True
+
+def filter_tracto_by_endings(tracto, start_mask, end_mask,**kwargs):
+    """
+    Filter the streamlines in the tractogram based on their endpoints.
+
+    Parameters
+    ----------
+    tracto : ActiDepFile or str
+        The tractogram to filter.
+    start_mask : ActiDepFile or str
+        The binary mask defining the start region.
+    end_mask : ActiDepFile or str
+        The binary mask defining the end region.
+    Returns
+    -------
+    dict
+        A dictionary containing the path to the filtered tractogram file.
+    """
+    inputs = {
+        "tracto": tracto if isinstance(tracto, str) else tracto.path,
+        "start_mask": start_mask if isinstance(start_mask, str) else start_mask.path,
+        "end_mask": end_mask if isinstance(end_mask, str) else end_mask.path
+    }
+
+    command_args = [
+        "$tracto",
+        "-include", "$start_mask",
+        "-include", "$end_mask",
+        "-force",
+        "filtered_tracto.tck"
+    ]
+    entities = tracto.get_full_entities()
+    output_patterns = {
+        "filtered_tracto.tck": upt_dict(entities,desc='filtered',filter='endings')
+    }
+    return run_mrtrix_command('tckedit', inputs, output_patterns, entities_template=parse_filename(os.path.basename(tracto.path)) if hasattr(tracto, 'path') else {}, command_args=command_args, **kwargs)
+
+def filter_tracto_by_endings_dipy(tracto, reference, start_mask, end_mask, output_file=None):
+    """
+    Filter the streamlines in the tractogram based on their endpoints using DIPY.
+
+    Parameters
+    ----------
+    tracto : ActiDepFile or str
+        The tractogram to filter.
+    reference : ActiDepFile or str
+        The reference image for the tractogram.
+    start_mask : ActiDepFile or str
+        The binary mask defining the start region.
+    end_mask : ActiDepFile or str
+        The binary mask defining the end region.
+    output_file : str, optional
+        Path to save the filtered tractogram. If None, a temporary file will be created.
+
+    Returns
+    -------
+    str
+        Path to the filtered tractogram file.
+    """
+    import nibabel as nib
+    from dipy.tracking.streamline import set_number_of_points
+
+    tracto_path = tracto if isinstance(tracto, str) else tracto.path
+    ref_path = reference if isinstance(reference, str) else reference.path
+    start_mask_path = start_mask if isinstance(start_mask, str) else start_mask.path
+    end_mask_path = end_mask if isinstance(end_mask, str) else end_mask.path
+
+    # Load the tractogram and masks
+    tractogram = load_tractogram(tracto_path, ref_path)
+    start_img = nib.load(start_mask_path)
+    end_img = nib.load(end_mask_path)
+
+    start_data = start_img.get_fdata().astype(bool)
+    end_data = end_img.get_fdata().astype(bool)
+
+    # Get the affine of the reference image
+    affine = nib.load(ref_path).affine
+    inv_affine = np.linalg.inv(affine)
+
+    filtered_streamlines = []
     
+    for sl in tractogram.streamlines:
+        if len(sl) < 2:
+            continue
+        
+        # Get start and end points in voxel space
+        start_voxel = np.round(nib.affines.apply_affine(inv_affine, sl[0])).astype(int)
+        end_voxel = np.round(nib.affines.apply_affine(inv_affine, sl[-1])).astype(int)
+        
+        # Check if points are within bounds and in the masks
+        if (0 <= start_voxel[0] < start_data.shape[0] and 
+            0 <= start_voxel[1] < start_data.shape[1] and
+            0 <= start_voxel[2] < start_data.shape[2] and
+            0 <= end_voxel[0] < end_data.shape[0] and
+            0 <= end_voxel[1] < end_data.shape[1] and
+            0 <= end_voxel[2] < end_data.shape[2]):
+            if start_data[start_voxel[0], start_voxel[1], start_voxel[2]] and end_data[end_voxel[0], end_voxel[1], end_voxel[2]]:
+                filtered_streamlines.append(sl)
+
+    # Create a new tractogram with the filtered streamlines
+    filtered_tractogram = StatefulTractogram(filtered_streamlines, ref_path, Space.RASMM)
+    if output_file is None:
+        temp_dir = tempfile.mkdtemp()
+        output_file = os.path.join(temp_dir, 'filtered_tracto.tck')
+    save_tractogram(filtered_tractogram, output_file, bbox_valid_check=False)
+    
+    entities = tracto.get_full_entities()
+    return {output_file: upt_dict(entities, desc='filtered', filter='endings')}
+
 
 
 if __name__ == "__main__":

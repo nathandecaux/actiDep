@@ -8,7 +8,7 @@ from actiDep.set_config import set_config
 from actiDep.data.loader import Subject, Actidep
 from actiDep.data.io import copy2nii, move2nii, copy_list, copy_from_dict
 from actiDep.utils.tools import del_key, upt_dict, create_pipeline_description, CLIArg
-from actiDep.utils.clustering import associate_subject_to_centroids
+from actiDep.utils.clustering import associate_subject_to_centroids, get_stat_from_association_file
 from actiDep.set_config import get_HCP_bundle_names
 from dipy.tracking.streamline import set_number_of_points
 import tempfile
@@ -19,11 +19,11 @@ import time
 import multiprocessing
 
 # Répertoire contenant les centroids HCP
-HCP_CENTROIDS_DIR = "/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/long_central_line"
+HCP_CENTROIDS_DIR = "/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/UMAP_endpoints/centroids_umapendpoints"
 HCP_FULL_BUNDLE_DIR = "/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/vtk/"
 HCP_REFERENCE = "/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat/inGroupe1Space/Atlas/average_anat.nii.gz"
 
-pipeline='hcp_association_24pts'
+pipeline='hcp_association_multiclusters_umapendpoints'
 # def get_bundle_mapping():
 #     """
 #     Créer un mapping entre les noms de bundles et les fichiers centroids correspondants.
@@ -65,7 +65,7 @@ def init_pipeline(subject, pipeline, **kwargs):
     )
     return True
 
-def process_bundle_associations(subject, pipeline, **kwargs):
+def process_bundle_associations(subject, pipeline, n_pts=50, **kwargs):
     """
     Traiter toutes les associations de bundles pour un sujet.
     
@@ -113,6 +113,7 @@ def process_bundle_associations(subject, pipeline, **kwargs):
                     model_centroids_path=centroid_path,
                     model_full_bundle_path=model_bundle_path,
                     reference_nifti=HCP_REFERENCE,
+                    n_pts=n_pts,
                     **kwargs
                 )
                 elapsed_time = time.time() - start_time
@@ -120,6 +121,86 @@ def process_bundle_associations(subject, pipeline, **kwargs):
                 
                 # Copier les résultats dans le layout BIDS
                 copy_from_dict(subject, res_dict, pipeline=pipeline)
+                
+                print(f"Association terminée pour {bundle_name}")
+                
+            except (FileNotFoundError, IOError, ValueError, RuntimeError) as e:
+                import traceback
+                print(f"Erreur lors du traitement de {bundle_name}: {e}")
+                print("Full traceback:")
+                traceback.print_exc()
+                continue
+        else:
+            print(f"Pas de centroids trouvés pour le bundle {bundle_name}")
+
+def bundle_association_multiclusters(subject, pipeline, n_pts=50, clustering_method='frechet', **kwargs):
+    """
+    Traiter toutes les associations de bundles pour un sujet.
+    
+    Parameters
+    ----------
+    subject : Subject
+        Objet Subject à traiter
+    pipeline : str
+        Nom du pipeline
+    """
+    # Obtenir le mapping des bundles
+    bundle_mapping = get_HCP_bundle_names()
+
+        
+    vtk_files = subject.get(
+        pipeline='mcm_tensors_staniz',
+        extension='vtk',
+        datatype='tracto'
+    )
+    #Sort les fichiers par nom de bundle
+    vtk_files.sort(key=lambda x: x.get_entities().get('bundle', ''))
+    
+    ref_anat = subject.get_unique(
+        pipeline='anima_preproc',
+        metric='FA',
+        extension='nii.gz'
+    )
+
+    print(f"Trouvé {len(vtk_files)} fichiers VTK pour le sujet {subject.sub_id}")
+    # vtk_files = [vtk_file for vtk_file in vtk_files if vtk_file.get_entities().get('bundle', '') == 'CC1']
+    for vtk_file in vtk_files:
+        # Extraire le nom du bundle depuis les entités
+        entities = vtk_file.get_entities()
+        bundle_name = entities.get('bundle', '')
+        
+        if bundle_name in bundle_mapping:
+            hcp_bundle_name = bundle_mapping[bundle_name]
+            centroid = subject.get_unique(
+                pipeline='bundle_seg_nonrigid',clustering=clustering_method,
+                bundle=bundle_name)
+            centroid_path = centroid.path
+            model_bundle = subject.get_unique(
+                pipeline='bundle_seg_nonrigid',suffix='tracto',datatype='atlas',
+                bundle=bundle_name)
+            model_bundle_path = model_bundle.path
+            print(f"Traitement du bundle {bundle_name} avec centroids {centroid_path}, full bundle {model_bundle_path}")
+            
+            if len(subject.get(pipeline=pipeline, bundle=bundle_name, datatype='metric', suffix='mean'))>0:
+                print(f'Bundle {bundle_name} already exists in {pipeline}, skipping')
+                continue
+            try:
+                # Appliquer l'association
+                start_time = time.time()
+                res_dict = associate_subject_to_centroids(
+                    subject_bundle=vtk_file,
+                    model_centroids_path=centroid_path,
+                    model_full_bundle_path=model_bundle_path,
+                    reference_nifti=ref_anat.path,
+                    n_pts=n_pts,
+                    slr=False,
+                    **kwargs
+                )
+                elapsed_time = time.time() - start_time
+                print(f"associate_subject_to_centroids executed in {elapsed_time:.2f} seconds")
+                
+                # Copier les résultats dans le layout BIDS
+                copy_from_dict(subject, res_dict, pipeline=pipeline,clustering=clustering_method)
                 
                 print(f"Association terminée pour {bundle_name}")
                 
@@ -165,7 +246,7 @@ def combine_csv(subject, pipeline):
         #Save the DataFrame to a CSV file in a temporary directory
         output_path = os.path.join(temp_dir, f"{metric}_metrics.csv")
         #set nan to 0.0
-        df.fillna(0.0, inplace=True)
+        # df.fillna(0.0, inplace=True)
         df.to_csv(output_path, index=False,sep=';')
 
         entities_metric = entities.copy()
@@ -182,6 +263,8 @@ def combine_csv(subject, pipeline):
         pipeline='hcp_association_tractseg',
         datatype='metric'
     )
+
+
 
 def get_central_line_displacement(subject, pipeline=pipeline):
     """
@@ -261,9 +344,65 @@ def get_central_line_displacement(subject, pipeline=pipeline):
         print(f"MDF values saved to {output_path}")
         return output_path
 
+def compute_stats_vtk(subject,pipeline):
+    """
+    Compute stats on the VTK files generated by the HCP association pipeline.
     
+    Parameters
+    ----------
+    subject : Subject
+        Subject object to process
+    pipeline : str
+        Pipeline name
+    """
+    if not isinstance(subject, Subject):
+        subject = Subject(subject)
+    
+    vtk_files = subject.get(
+        pipeline=pipeline,
+        desc='associations',
+        extension='vtk',
+        datatype='tracto'
+    )
 
-def process_hcp_association(subject,pipeline=pipeline):
+    print(f"Found {len(vtk_files)} association VTK files for subject {subject.sub_id}")
+
+    # scalar_files = subject.get(
+    #     pipeline='mcm_tensors_staniz',
+    #     extension='vtk',
+    #     datatype='tracto'
+    # )
+    
+    for vtk_file in vtk_files:
+        entities = vtk_file.get_entities()
+        bundle_name = entities.get('bundle', '')
+        print(f"Computing stats for subject {subject.sub_id}, bundle {bundle_name}")
+
+        if 'multiclusters' in pipeline or 'singlecluster' in pipeline:
+            scalar_file = subject.get_unique(
+                pipeline='mcm_tensors_staniz',
+                bundle=bundle_name,
+                extension='vtk',
+                datatype='tracto'
+            )
+        else:
+            scalar_file = subject.get_unique(
+                pipeline='mcm_to_hcp_space',
+                bundle=bundle_name,
+                extension='vtk',
+                datatype='tracto'
+            )
+
+        stats= get_stat_from_association_file(
+            vtk_file,
+            scalar_file)
+        
+        entities=vtk_file.get_entities()
+        copy_from_dict(subject,file_dict=stats,pipeline=pipeline)
+
+
+
+def process_hcp_association(subject,pipeline=pipeline,n_pts=50):
     """
     Process the HCP association pipeline on the given subject.
     
@@ -275,19 +414,24 @@ def process_hcp_association(subject,pipeline=pipeline):
 
     if isinstance(subject, str):
         subject = Subject(subject)
-
+    if not 'pts' in pipeline:
+        pipeline=pipeline+f'_{n_pts}pts'
     # Define processing steps
     pipeline_list = [
         # 'init',
         # 'bundle_associations',
-        'combine_csv',
+        'bundle_association_multiclusters',
+        # 'compute_stats_vtk',
+        # 'combine_csv',
         # 'central_line_displacement'
     ]
     
     # Process each requested pipeline step
     step_mapping = {
         'init': lambda: init_pipeline(subject, pipeline),
-        'bundle_associations': lambda: process_bundle_associations(subject, pipeline),
+        'bundle_associations': lambda: process_bundle_associations(subject, pipeline,n_pts=n_pts),
+        'bundle_association_multiclusters': lambda: bundle_association_multiclusters(subject, pipeline,n_pts=n_pts,clustering_method='umapendpoints'),
+        'compute_stats_vtk': lambda: compute_stats_vtk(subject, pipeline),
         'combine_csv': lambda: combine_csv(subject, pipeline),
         'central_line_displacement': lambda: get_central_line_displacement(subject, pipeline)
     }
@@ -301,15 +445,18 @@ def process_hcp_association(subject,pipeline=pipeline):
 
 if __name__ == "__main__":
     # If hostname is calcarine, set tempdir to /local/ndecaux/tmp
+    n_proc=1
     if os.uname()[1] == 'calcarine':
         tempfile.tempdir = '/local/ndecaux/tmp'
+        n_proc=32
 
     config, tools = set_config()
-    print("HCP Association pipeline")
+    print("HCP Association pipeline : ", pipeline)
     print("=====================================")
     print('Reading dataset')
     # db_root = '/home/ndecaux/Code/Data/dysdiago'
-    db_root = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids'
+    # db_root = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids'
+    db_root="/home/ndecaux/NAS_EMPENN/share/projects/amynet/bids"
     ds = Actidep(db_root)
     print(f"Found {len(ds.subject_ids)} subjects")
     print("=====================================")
@@ -318,26 +465,26 @@ if __name__ == "__main__":
         try:
             subject = ds.get_subject(sub)
             # Vérifier si le sujet a des fichiers VTK dans mcm_to_hcp_space
-            vtk_files = subject.get(
-                pipeline='mcm_to_hcp_space',
-                space='HCP', 
-                extension='vtk',
-                datatype='tracto'
-            )
+            # vtk_files = subject.get(
+            #     pipeline='mcm_to_hcp_space',
+            #     space='HCP', 
+            #     extension='vtk',
+            #     datatype='tracto'
+            # )
             # if len(vtk_files) == 0:
             #     print(f"Skipping subject {sub} - pas de fichiers VTK dans mcm_to_hcp_space")
             #     return
             # Vérifier si les associations existent déjà
-            existing_associations = subject.get(
-                pipeline=pipeline,
-                desc='associations',
-                extension='vtk'
-            )
+            # existing_associations = subject.get(
+            #     pipeline=pipeline,
+            #     desc='associations',
+            #     extension='vtk'
+            # )
             # if len(existing_associations) > 70:
             #     print(f"Skipping subject {sub} - associations déjà existantes")
             #     return
             print(f"Processing subject: {sub}")
-            process_hcp_association(subject)
+            process_hcp_association(subject,n_pts=50)
         except Exception as e:
             print(f"Erreur lors du traitement du sujet {sub}: {e}")
             import traceback
@@ -345,7 +492,7 @@ if __name__ == "__main__":
             return
 
     # Use multiprocessing to process subjects in parallel
-    with multiprocessing.Pool(16) as pool:
-        pool.map(process_one_subject, ds.subject_ids)
+    with multiprocessing.Pool(n_proc) as pool:
+        pool.map(process_one_subject, ds.subject_ids)  # Replace with ds.subject_ids for all subjects
     print("HCP Association pipeline completed")
 

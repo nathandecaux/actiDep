@@ -1652,7 +1652,7 @@ def process_subject(subject_id, dataset_path, output_base_path, atlas_dir):
         print(f"  Full traceback:\n{full_traceback}")
         return error_msg
 
-def process_subject_apply_transform(subject_id, dataset_path, output_base_path, atlas_dir):
+def process_subject_apply_transform(subject_id, dataset_path, output_base_path, atlas_dir,overwrite=True):
     """
     Process a single subject and apply the transformation matrix to the MCM VTK files.
     
@@ -1787,6 +1787,9 @@ def process_subject_apply_transform(subject_id, dataset_path, output_base_path, 
             extension='vtk'
         )
         already_done = [f.get_full_entities()['bundle'] for f in already_done]
+        if overwrite:
+            print("  Overwrite is True, reprocessing all bundles")
+            already_done = []
         print(f"  Already processed bundles: {already_done}")
         bundles = [b for b in bundles if b not in already_done]  # Filter out already processed bundles
 
@@ -1819,10 +1822,10 @@ def process_subject_apply_transform(subject_id, dataset_path, output_base_path, 
                 transformation_center=transformation_center
             )
             entitites= mcm_vtk_files[0].get_full_entities()
+            print(transformed_vtk_path)
             
             
-            
-            final_save_path=copy_from_dict(subject,{transformed_vtk_path: entitites},pipeline='mcm_to_hcp_space',space='HCP')
+            final_save_path=copy_from_dict(subject,{transformed_vtk_path: entitites},pipeline='mcm_to_hcp_space',space='HCP',remove_after_copy=False)
 
             #Remove the transformed_vtk_path file
             shutil.rmtree(transformed_vtk_path, ignore_errors=True)
@@ -2247,20 +2250,24 @@ if __name__ == "__main__":
 
     #### Central line extraction example 
     ## Get all subjects in the dataset
-    # dataset_path = "/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids"
-    dataset_path = '/home/ndecaux/Data/dysdiago/'
+    dataset_path = "/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids"
+    # dataset_path = '/home/ndecaux/Data/dysdiago/'
     output_base_path = '/home/ndecaux/Code/Data/actidep_atlas/moved_mcm_projections'
     atlas_dir = '/home/ndecaux/Data/actidep_atlas'
     
     dataset = Actidep(dataset_path)
     subjects = dataset.get_subjects()
-    # subjects = [s for s in subjects if '01034' in s]  # Filter for specific subject IDs, e.g., '01002'
+    subjects = [s for s in subjects if '01001' in s]  # Filter for specific subject IDs, e.g., '01002'
     print(f"Processing {len(subjects)} subjects...")
     
     # Set up multiprocessing
-    num_processes = 16#min(mp.cpu_count() - 1, len(subjects))  # Use all CPUs minus 1, or number of subjects if less
+    num_processes = 1#min(mp.cpu_count() - 1, len(subjects))  # Use all CPUs minus 1, or number of subjects if less
     print(f"Using {num_processes} processes for parallel processing")
     
+    #If hostname == 'calcarine'
+    if os.uname()[1] == 'calcarine':
+        num_processes = 16
+
     # Create partial function with fixed parameters
     process_func = partial(
         process_subject_apply_transform,

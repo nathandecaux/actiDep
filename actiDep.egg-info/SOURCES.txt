@@ -14,14 +14,18 @@ actiDep.egg-info/dependency_links.txt
 actiDep.egg-info/requires.txt
 actiDep.egg-info/top_level.txt
 actiDep/analysis/__init__.py
+actiDep/analysis/afq_optimized.py
 actiDep/analysis/fiber_density.py
 actiDep/analysis/generate_report.py
 actiDep/analysis/generate_report_v2.py
-actiDep/analysis/generate_report_v2.sync-conflict-20250826-094617-XJBZN6U.py
 actiDep/analysis/mcm_odf.py
 actiDep/analysis/microstructure.py
+actiDep/analysis/report_analysis copy.py
+actiDep/analysis/report_analysis.py
+actiDep/analysis/report_analysis_actimetry.py
 actiDep/analysis/stats.ipynb
 actiDep/analysis/tractometry.py
+actiDep/analysis/tractometry.sync-conflict-20250916-203725-XJBZN6U.py
 actiDep/atlasing/HCP_atlasing.py
 actiDep/atlasing/HCP_atlasing_anima.py
 actiDep/atlasing/HCP_averaging.py
@@ -37,13 +41,16 @@ actiDep/data/mcmfile.py
 actiDep/data/old_loader.py
 actiDep/pipeline/__init__.py
 actiDep/pipeline/bundle_seg.py
+actiDep/pipeline/bundle_seg.sync-conflict-20250916-203724-XJBZN6U.py
 actiDep/pipeline/classifyber.py
 actiDep/pipeline/hcp_association.py
 actiDep/pipeline/mcm_3_comparts.py
-actiDep/pipeline/mcm_projection.py
 actiDep/pipeline/msmt_csd.py
 actiDep/pipeline/preprocessing.py
 actiDep/pipeline/recobundle_segmentation.py
+actiDep/pipeline/streamline_registration(1).py
+actiDep/pipeline/tractseg.py
+actiDep/pipeline/tractseg_fsl.py
 actiDep/pipeline/tractseg_pipeline.py
 actiDep/ui/browser.py
 actiDep/ui/test.ipynb
@@ -58,7 +65,9 @@ actiDep/utils/fod.py
 actiDep/utils/hash_utils.py
 actiDep/utils/mcm.py
 actiDep/utils/recobundle.py
+actiDep/utils/recobundle.sync-conflict-20250916-203724-XJBZN6U.py
 actiDep/utils/registration.py
+actiDep/utils/registration.sync-conflict-20250916-203724-XJBZN6U.py
 actiDep/utils/segmentation.py
 actiDep/utils/tools.py
 actiDep/utils/tractography.py

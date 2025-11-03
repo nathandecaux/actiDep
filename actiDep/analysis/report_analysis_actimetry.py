@@ -7,7 +7,7 @@ import sys
 pn.extension('tabulator')
 
 # CSV_PATH = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/report_no_actimetry_tractseg/summary_results.csv'
-CSV_PATH = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/report_actimetry_calcarine/summary_results.csv'
+CSV_PATH = '/data/ndecaux/report_actimetry_calcarine/summary_results.csv'
 def load_data(path=CSV_PATH):
     df = pd.read_csv(path)
     df['var']  = df['type'].apply(lambda x: '_'.join(x.split('_')[1:]))
@@ -187,6 +187,62 @@ metric_filter = pn.widgets.MultiChoice(name="Metric contient", placeholder="ex: 
 bundle_filter = pn.widgets.MultiChoice(name="Bundle contient", options=sorted(df['bundle'].unique()), value=[])
 type_filter   = pn.widgets.MultiChoice(name="Type", options=sorted(df['type'].unique()), value=[])
 var_filter    = pn.widgets.MultiChoice(name="Var",  options=sorted(df['var'].unique()), value=[])
+
+# Ajout des listes prédéfinies
+fronto_limbiques = [
+    "CG_left", "CG_right",
+    "UF_left", "UF_right",
+    "FX_left", "FX_right",
+    "FPT_left", "FPT_right",
+    "T_PREF_left", "T_PREF_right",
+    "ST_FO_left", "ST_FO_right",
+    "ST_PREF_left", "ST_PREF_right"
+]
+
+emotions = [
+    "CG_left", "CG_right",
+    "UF_left", "UF_right",
+    "FX_left", "FX_right",
+    "ATR_left", "ATR_right",
+    "CA",
+    "T_PREF_left", "T_PREF_right",
+    "ST_FO_left", "ST_FO_right",
+    "ST_PREF_left", "ST_PREF_right"
+]
+
+moteurs = [
+    "CST_left", "CST_right",
+    "CC_3", "CC_4",
+    "T_PREM_left", "T_PREM_right",
+    "T_PREC_left", "T_PREC_right",
+    "T_POSTC_left", "T_POSTC_right",
+    "ST_PREM_left", "ST_PREM_right",
+    "ST_PREC_left", "ST_PREC_right",
+    "ST_POSTC_left", "ST_POSTC_right",
+    "ICP_left", "ICP_right",
+    "MCP",
+    "SCP_left", "SCP_right"
+]
+
+# Boutons pour appliquer les listes prédéfinies
+fronto_limbiques_btn = pn.widgets.Button(name="Fronto-Limbiques", button_type="primary")
+emotions_btn = pn.widgets.Button(name="Émotions", button_type="success")
+moteurs_btn = pn.widgets.Button(name="Moteurs", button_type="warning")
+
+def _apply_list_to_bundle(event, bundle_list):
+    bundle_filter.value = bundle_filter.value+[x.replace('_','') for x in bundle_list]
+
+fronto_limbiques_btn.on_click(lambda event: _apply_list_to_bundle(event, fronto_limbiques))
+emotions_btn.on_click(lambda event: _apply_list_to_bundle(event, emotions))
+moteurs_btn.on_click(lambda event: _apply_list_to_bundle(event, moteurs))
+
+# Ajout des filtres pour les colonnes numériques avec seuils
+n_sig_corrected_filter = pn.widgets.TextInput(name="n_sig_corrected (>, <)", placeholder="ex: >5")
+min_p_corrected_filter = pn.widgets.TextInput(name="min_p_corrected (>, <)", placeholder="ex: <0.05")
+max_abs_r_partial_filter = pn.widgets.TextInput(name="max_abs_r_partial (>, <)", placeholder="ex: >0.8")
+removed_subjects_filter = pn.widgets.TextInput(name="removed_subjects (>, <)", placeholder="ex: >2")
+removed_points_filter = pn.widgets.TextInput(name="removed_points (>, <)", placeholder="ex: <10")
+
 reset_filters_btn = pn.widgets.Button(name="Réinitialiser filtres", button_type='warning')
 
 def _apply_sidebar_filters(event=None):
@@ -199,10 +255,34 @@ def _apply_sidebar_filters(event=None):
         sub = sub[sub['type'].isin(type_filter.value)]
     if var_filter.value:
         sub = sub[sub['var'].isin(var_filter.value)]
+    # Application des filtres numériques avec seuils
+    for col, widget in [
+        ('n_sig_corrected', n_sig_corrected_filter),
+        ('min_p_corrected', min_p_corrected_filter),
+        ('max_abs_r_partial', max_abs_r_partial_filter),
+        ('removed_subjects', removed_subjects_filter),
+        ('removed_points', removed_points_filter),
+    ]:
+        if widget.value:
+            try:
+                if widget.value[0] in ('>', '<'):
+                    op, val = widget.value[0], float(widget.value[1:])
+                else:
+                    op, val = '==', float(widget.value)
+                if op == '>':
+                    sub = sub[sub[col] > val]
+                elif op == '<':
+                    sub = sub[sub[col] < val]
+                elif op == '==':
+                    sub = sub[sub[col] == val]
+            except Exception:
+                pass
     # Met à jour le dataframe affiché; les header filters Tabulator s'appliquent ensuite dessus
     table.value = sub
 
-for w in (metric_filter, bundle_filter, type_filter, var_filter):
+for w in (metric_filter, bundle_filter, type_filter, var_filter,
+          n_sig_corrected_filter, min_p_corrected_filter, max_abs_r_partial_filter,
+          removed_subjects_filter, removed_points_filter):
     w.param.watch(_apply_sidebar_filters, 'value')
 
 def _reset_filters(event):
@@ -210,12 +290,16 @@ def _reset_filters(event):
     bundle_filter.value = ""
     type_filter.value = []
     var_filter.value = []
+    n_sig_corrected_filter.value = ""
+    min_p_corrected_filter.value = ""
+    max_abs_r_partial_filter.value = ""
+    removed_subjects_filter.value = ""
+    removed_points_filter.value = ""
     _apply_sidebar_filters()
 
 reset_filters_btn.on_click(_reset_filters)
 # Initial
 _apply_sidebar_filters()
-# -----------------------------------------
 
 template = pn.template.FastListTemplate(
     title="Résultats Actimétrie",
@@ -229,6 +313,16 @@ template = pn.template.FastListTemplate(
         bundle_filter,
         type_filter,
         var_filter,
+        "#### Listes prédéfinies",
+        fronto_limbiques_btn,
+        emotions_btn,
+        moteurs_btn,
+        "#### Filtres numériques",
+        n_sig_corrected_filter,
+        min_p_corrected_filter,
+        max_abs_r_partial_filter,
+        removed_subjects_filter,
+        removed_points_filter,
         reset_filters_btn,
     ],
     main=[tabs],
@@ -243,7 +337,7 @@ if __name__ == '__main__':
     if '--autoreload' in sys.argv:
         template.show(port=5007, autoreload=True)
     else:
-        template.show(port=5007)
+        template.show(port=5007,websocket_origin='*')  # adjust websocket_origin as needed
 
 
 

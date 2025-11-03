@@ -85,9 +85,9 @@ def animaPreprocessing(subject, with_reversed_b0 = True, db_root='/home/ndecaux/
 
     preprocCommand = ["python3", tools['animaDiffusionImagePreprocessing'], "-t", temp_t1, "-i", temp_dwi,'--temp-folder',temp_dir]
 
-    # preprocCommand +=  ["-D"] + dicom_files
+    preprocCommand +=  ["-D"] + dicom_files
     preprocCommand = preprocCommand + ["-b", temp_bval]
-    preprocCommand = preprocCommand + ["-g", temp_bvec]
+    # preprocCommand = preprocCommand + ["-g", temp_bvec]
     # preprocCommand = preprocCommand + ["--no-disto-correction"]
     # preprocCommand = preprocCommand + ["--no-eddy-correction","--no-denoising"]
     if with_reversed_b0:
@@ -141,7 +141,8 @@ def compute_fa(subject, db_root='/home/ndecaux/Code/Data/dysdiago'):
     
     subject = Subject(subject, db_root)
     
-    tensors = subject.get(suffix='dwi',pipeline=pipeline,desc='tensors')[0]
+    tensors = subject.get_unique(suffix='dwi',pipeline=pipeline,model='DTI',metric=None)
+    print(tensors.path)
     #create temporary directory
     temp_dir = tempfile.mkdtemp()
 
@@ -155,9 +156,32 @@ def compute_fa(subject, db_root='/home/ndecaux/Code/Data/dysdiago'):
     print(tensors.get_full_entities())
     copy_from_dict(subject, res_dict, pipeline=pipeline)
 
+def process_all_FA(db_root='/home/ndecaux/Code/Data/dysdiago'):
+    """
+    Process all subjects in the database to compute FA.
+    """
+    config,tools = set_config()
+    
+    from actiDep.data.loader import Actidep
+    ds = Actidep(db_root)
+    
+    subjects = ds.get_subjects()
+    
+    for subject in subjects:
+        try:
+            print(f"Processing subject {subject} for FA computation.")
+            compute_fa(subject, db_root=db_root)
+        except Exception as e:
+            print(f"Error processing subject {subject}: {e}")
+        
+
 if __name__ == '__main__':
     config,tools = set_config()
     # animaPreprocessing('01',db_root="/home/ndecaux/NAS_EMPENN/share/projects/actidep/IRM_Cerveau_MOI/bids")
     # animaPreprocessing('02')
-    compute_fa('01',db_root="/home/ndecaux/NAS_EMPENN/share/projects/actidep/IRM_Cerveau_MOI/bids")
+    # animaPreprocessing('03026',db_root="/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids")
+    # compute_fa('01',db_root="/home/ndecaux/NAS_EMPENN/share/projects/actidep/IRM_Cerveau_MOI/bids")
     # compute_fa('02')
+
+    amynet='/home/ndecaux/NAS_EMPENN/share/projects/amynet/bids'
+    process_all_FA(db_root=amynet)

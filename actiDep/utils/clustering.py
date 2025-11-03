@@ -38,6 +38,7 @@ import os
 from dipy.align.streamlinear import StreamlineLinearRegistration
 import shapely
 from shapely import LineString, MultiLineString, Polygon
+import csv
 
 def load_vtk_streamlines(vtk_file_path):
     """
@@ -259,7 +260,9 @@ def associate_subject_to_centroids(subject_bundle,
                                    model_centroids_path,
                                    model_full_bundle_path,
                                    reference_nifti,
-                                   temp_dir=None):
+                                   n_pts=50,
+                                   temp_dir=None,
+                                   slr=True):
     """
     Associe les streamlines d'un bundle de sujet aux centroids d'un modèle.
     
@@ -290,9 +293,9 @@ def associate_subject_to_centroids(subject_bundle,
 
     slr_n_points= 12
     streamline_association_n_points = 12  # Nombre de points par streamline pour l'association
-    points_association_n_points= 100
+    points_association_n_points= n_pts
 
-    centroids = set_number_of_points(centroids, streamline_association_n_points)  # Interpoler à 100 points par centroid
+    centroids = set_number_of_points(centroids, points_association_n_points)  # Interpoler à 100 points par centroid
 
     # Charger les modèles
     from dipy.io.streamline import load_tractogram
@@ -303,41 +306,55 @@ def associate_subject_to_centroids(subject_bundle,
     # model_full_bundle = load_tractogram(model_full_bundle_path,
     #                                     reference_nifti,
     #                                     bbox_valid_check=False)
-    model_full_bundle,_ = load_vtk_streamlines(model_full_bundle_path)
+
+    if model_full_bundle_path.endswith('.trk'):
+        model_full_bundle_tracto = load_tractogram(model_full_bundle_path,
+                                           reference_nifti,
+                                           bbox_valid_check=False)
+        model_full_bundle = model_full_bundle_tracto.streamlines
+    else:
+        model_full_bundle,_ = load_vtk_streamlines(model_full_bundle_path)
 
     print(f"Nombre de streamlines du sujet : {len(streamlines)}")
     print(f"Nombre de centroids du modèle : {len(centroids)}")
     print(f"Nombre de streamlines du bundle complet : {len(model_full_bundle)}")
 
-    # Clustering des streamlines du sujet pour réduire la charge SLR
-    subject_streamlines_resampled = [set_number_of_points(s, slr_n_points) for s in streamlines]  # Interpoler à 100 points par streamline
-    subject_streamlines_obj = Streamlines(subject_streamlines_resampled)
-    
-    metric = AveragePointwiseEuclideanMetric()
-    qb_subject = QuickBundles(threshold=15., metric=metric)
-    subject_clusters = qb_subject.cluster(set_number_of_points(subject_streamlines_obj, slr_n_points))
-    subject_centroids = Streamlines(subject_clusters.centroids)
-    print(f"Clustering du sujet : {len(subject_clusters)} clusters créés")
+    if slr:
+        # Clustering des streamlines du sujet pour réduire la charge SLR
+        subject_streamlines_resampled = [set_number_of_points(s, slr_n_points) for s in streamlines]  # Interpoler à 100 points par streamline
+        subject_streamlines_obj = Streamlines(subject_streamlines_resampled)
+        
+        metric = AveragePointwiseEuclideanMetric()
+        qb_subject = QuickBundles(threshold=15., metric=metric)
+        subject_clusters = qb_subject.cluster(set_number_of_points(subject_streamlines_obj, slr_n_points))
+        subject_centroids = Streamlines(subject_clusters.centroids)
+        print(f"Clustering du sujet : {len(subject_clusters)} clusters créés")
 
-    # Clustering du modèle complet pour réduire la charge SLR
-    model_streamlines_resampled = [set_number_of_points(s, slr_n_points) for s in model_full_bundle]  # Interpoler à 100 points par streamline
-    model_streamlines_obj = Streamlines(model_streamlines_resampled)
-    
-    qb_model = QuickBundles(threshold=15., metric=metric)
-    model_clusters = qb_model.cluster(set_number_of_points(model_streamlines_obj, slr_n_points))
-    model_centroids = Streamlines(model_clusters.centroids)
-    print(f"Clustering du modèle : {len(model_clusters)} clusters créés")
-
-    try:
-        slr = StreamlineLinearRegistration()
-        # Inverser l'ordre : recaler le modèle sur le sujet
-        slm = slr.optimize(subject_centroids, model_centroids)
-        # Appliquer la transformation aux centroids du modèle
-        transformed_centroids = slm.transform(Streamlines(centroids))
-        print("SLR avec clustering terminé avec succès - modèle recalé sur sujet")
-    except Exception as e:
-        print(f"Erreur lors du SLR: {e}")
+        # Clustering du modèle complet pour réduire la charge SLR
+        model_streamlines_resampled = [set_number_of_points(s, slr_n_points) for s in model_full_bundle]  # Interpoler à 100 points par streamline
+        model_streamlines_obj = Streamlines(model_streamlines_resampled)
+        
+        qb_model = QuickBundles(threshold=15., metric=metric)
+        model_clusters = qb_model.cluster(set_number_of_points(model_streamlines_obj, slr_n_points))
+        model_centroids = Streamlines(model_clusters.centroids)
+        print(f"Clustering du modèle : {len(model_clusters)} clusters créés")
+        print("Réalisation du SLR...")
+        time_start = os.times()
+        try:
+            slr = StreamlineLinearRegistration()
+            # Inverser l'ordre : recaler le modèle sur le sujet
+            slm = slr.optimize(subject_centroids, model_centroids)
+            # Appliquer la transformation aux centroids du modèle
+            transformed_centroids = slm.transform(Streamlines(centroids))
+            print("SLR avec clustering terminé avec succès - modèle recalé sur sujet")
+            time_end = os.times()
+            print(f"Temps écoulé pour le SLR : {time_end[0] - time_start[0]} secondes")
+        except Exception as e:
+            print(f"Erreur lors du SLR: {e}")
+            transformed_centroids = centroids
+    else:
         transformed_centroids = centroids
+        print("SLR non effectué, utilisation des centroids d'origine")
 
     # Association des streamlines du sujet avec les centroids transformés
     print(
@@ -375,8 +392,8 @@ def associate_subject_to_centroids(subject_bundle,
             associations.append(
                 (index_streamline, best_centroid, min_distance, best_flip))
             
-    transformed_centroids = set_number_of_points(transformed_centroids, 24)  # Interpoler à 100 points par centroid
-    centroids = transformed_centroids#set_number_of_points(centroids, 100)  # Interpoler à 100 points par centroid
+    # transformed_centroids = set_number_of_points(transformed_centroids, n_pts)  # Interpoler à n_pts points par centroid
+    # centroids = transformed_centroids#set_number_of_points(centroids, 100)  # Interpoler à 100 points par centroid
 
     print(f"Nombre d'associations : {len(associations)}")
 
@@ -406,11 +423,11 @@ def associate_subject_to_centroids(subject_bundle,
         assoc_distance= associations[i][2]
         
         # streamline = set_number_of_points(streamline, points_association_n_points)
-        if cluster_id >= 0 and cluster_id < len(transformed_centroids):
+        if cluster_id >= 0:
             centroid = transformed_centroids[cluster_id].copy()
             # centroid = set_number_of_points(centroid, points_association_n_points)  # Interpoler à 100 points par centroid
             streamline_point_centroid_distances = []
-            streamlines_indices_correspondence = []
+            streamlines_indices_correspondance = []
             for point_idx, point in enumerate(streamline):
                 #Calcul la distance L1 entre point et chaque point du centroid
                 distances=[]
@@ -463,9 +480,11 @@ def associate_subject_to_centroids(subject_bundle,
 
     polydata_associations.SetLines(lines)
 
+    print('Nombre centroids 1 : ',np.unique(np.array(point_cluster_ids)))
+
     # Ajouter les arrays scalaires
     cluster_array = numpy_to_vtk(np.array(point_cluster_ids), deep=True)
-    cluster_array.SetName('cluster_association')
+    cluster_array.SetName('centroid_index')
     polydata_associations.GetPointData().AddArray(cluster_array)
 
     distance_array = numpy_to_vtk(np.array(point_distances), deep=True)
@@ -494,6 +513,7 @@ def associate_subject_to_centroids(subject_bundle,
     centroid_polydata.SetPoints(centroid_points)
     centroid_lines = vtk.vtkCellArray()
 
+    print('Nbr centroids 2 : ',len(centroids))
     for centroid_idx, centroid in enumerate(centroids):
         line = vtk.vtkPolyLine()
         line.GetPointIds().SetNumberOfIds(len(centroid))
@@ -592,6 +612,152 @@ def associate_subject_to_centroids(subject_bundle,
 
     print(f"Résultats sauvegardés dans {temp_dir}")
     return res_dict
+
+def get_stat_from_association_file(association_file, metrics_file):
+    """
+    Extrait des statistiques à partir d'un fichier d'association de streamlines.
+    
+    Parameters
+    ----------
+    association_file : ActidepFile
+        Fichier VTK contenant les associations de streamlines.
+    metrics_file : ActidepFile
+        Fichier VTK contenant les métriques des streamlines.
+        
+    Returns
+    -------
+    result_dict : dict
+        Dictionnaire contenant les chemins des fichiers CSV générés avec leurs entités.
+    """
+    streamlines, scalar_arrays = load_vtk_streamlines(association_file.path)
+    streamlines_metrics, scalar_arrays_metrics = load_vtk_streamlines(metrics_file.path)
+    if 'centroid_index' not in scalar_arrays:
+        if 'cluster_association' in scalar_arrays:
+            scalar_arrays['centroid_index'] = scalar_arrays['cluster_association']
+        else:
+            raise ValueError("Le fichier d'association doit contenir les arrays 'centroid_index' ou 'cluster_association'.")
+
+    centroid_indices = scalar_arrays['centroid_index']
+    association_distances = scalar_arrays['association_distance']
+    centroid_point_distances = scalar_arrays['centroid_point_distance']
+    point_indices = scalar_arrays['point_index']
+
+    unique_centroids = np.unique(centroid_indices[centroid_indices >= 0])
+    n_centroids = len(unique_centroids)
+    n_streamlines = len(streamlines)
+
+    temp_dir = tempfile.mkdtemp()
+    entities = association_file.get_full_entities()
+    result_dict = {}
+
+    # 1. CSV avec les statistiques globales
+    global_stats = {
+        'n_centroids': n_centroids,
+        'n_streamlines': n_streamlines,
+        'mean_association_distance': np.mean(association_distances[centroid_indices >= 0]),
+        'std_association_distance': np.std(association_distances[centroid_indices >= 0]),
+        'min_association_distance': np.min(association_distances[centroid_indices >= 0]),
+        'max_association_distance': np.max(association_distances[centroid_indices >= 0]),
+        'mean_centroid_point_distance': np.mean(centroid_point_distances[centroid_indices >= 0]),
+        'std_centroid_point_distance': np.std(centroid_point_distances[centroid_indices >= 0]),
+        'min_centroid_point_distance': np.min(centroid_point_distances[centroid_indices >= 0]),
+        'max_centroid_point_distance': np.max(centroid_point_distances[centroid_indices >= 0]),
+    }
+
+    for name, values in scalar_arrays_metrics.items():
+        if len(values) == len(streamlines_metrics):
+            mean_val = np.mean([values[i] for i in range(len(streamlines_metrics)) if centroid_indices[i] >= 0])
+            std_val = np.std([values[i] for i in range(len(streamlines_metrics)) if centroid_indices[i] >= 0])
+            global_stats[f'mean_{mcm_name_mapping.get(name, name)}'] = mean_val
+            global_stats[f'std_{mcm_name_mapping.get(name, name)}'] = std_val
+
+    csv_global_path = os.path.join(temp_dir, 'stats_global.csv')
+    with open(csv_global_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['metric', 'value'])
+        for key, value in global_stats.items():
+            writer.writerow([key, value])
+    
+    result_dict[csv_global_path] = upt_dict(entities, desc='global', suffix='stats', datatype='metric', extension='csv')
+    print(f"Statistiques globales sauvegardées dans {csv_global_path}")
+
+    # 2. CSV avec les statistiques par centroïde
+    centroid_stats_rows = []
+    for centroid in unique_centroids:
+        mask = centroid_indices == centroid
+        row = {
+            'centroid_id': int(centroid),
+            'n_streamlines': int(np.sum(mask)),
+            'mean_association_distance': float(np.mean(association_distances[mask])),
+            'std_association_distance': float(np.std(association_distances[mask])),
+            'min_association_distance': float(np.min(association_distances[mask])),
+            'max_association_distance': float(np.max(association_distances[mask])),
+            'mean_centroid_point_distance': float(np.mean(centroid_point_distances[mask])),
+            'std_centroid_point_distance': float(np.std(centroid_point_distances[mask])),
+            'min_centroid_point_distance': float(np.min(centroid_point_distances[mask])),
+            'max_centroid_point_distance': float(np.max(centroid_point_distances[mask])),
+        }
+        
+        for name, values in scalar_arrays_metrics.items():
+            if len(values) == len(streamlines_metrics):
+                mean_val = np.mean([values[i] for i in range(len(streamlines_metrics)) if mask[i]])
+                std_val = np.std([values[i] for i in range(len(streamlines_metrics)) if mask[i]])
+                row[f'mean_{mcm_name_mapping.get(name, name)}'] = float(mean_val)
+                row[f'std_{mcm_name_mapping.get(name, name)}'] = float(std_val)
+        
+        centroid_stats_rows.append(row)
+
+    csv_centroid_path = os.path.join(temp_dir, 'stats_bycentroid.csv')
+    if centroid_stats_rows:
+        with open(csv_centroid_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=centroid_stats_rows[0].keys())
+            writer.writeheader()
+            writer.writerows(centroid_stats_rows)
+        
+        result_dict[csv_centroid_path] = upt_dict(entities, desc='bycentroid', suffix='stats', datatype='metric', extension='csv')
+        print(f"Statistiques par centroïde sauvegardées dans {csv_centroid_path}")
+
+    # 3. CSV avec les statistiques par point
+    point_centroid_indices = scalar_arrays['centroid_index']
+    unique_point_indices = np.unique(point_indices[point_centroid_indices >= 0])
+    point_values = {name: [] for name in scalar_arrays_metrics.keys() if len(scalar_arrays_metrics[name]) == len(point_indices)}
+    
+    for i, idx in enumerate(point_indices):
+        if point_centroid_indices[i] >= 0:
+            for name in point_values.keys():
+                point_values[name].append((idx, scalar_arrays_metrics[name][i]))
+
+    point_stats_rows = []
+    for name, vals in point_values.items():
+        vals_by_point = {}
+        for idx, val in vals:
+            if idx not in vals_by_point:
+                vals_by_point[idx] = []
+            vals_by_point[idx].append(val)
+        
+        for idx, vlist in sorted(vals_by_point.items()):
+            mean_val = np.mean(vlist)
+            std_val = np.std(vlist)
+            point_stats_rows.append({
+                'point_index': int(idx),
+                'metric': mcm_name_mapping.get(name, name),
+                'mean': float(mean_val),
+                'std': float(std_val),
+                'n_samples': len(vlist)
+            })
+
+    csv_point_path = os.path.join(temp_dir, 'stats_bypoint.csv')
+    if point_stats_rows:
+        with open(csv_point_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=['point_index', 'metric', 'mean', 'std', 'n_samples'])
+            writer.writeheader()
+            writer.writerows(point_stats_rows)
+        
+        result_dict[csv_point_path] = upt_dict(entities, desc='bypoint', suffix='stats', datatype='metric', extension='csv')
+        print(f"Statistiques par point sauvegardées dans {csv_point_path}")
+    print(result_dict)
+    return result_dict
+    
 
 
 if __name__ == "__main__":

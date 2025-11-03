@@ -17,13 +17,19 @@ import glob
 import shutil
 from time import sleep
 
+def already_done(subject, pipeline, out_entities):
+    """Check if all output entities already exist for the subject in the given pipeline"""
+    if len(subject.get(**out_entities)) > 0:
+        return True
+    return False
+    
 
 def get_dwi_data(subject):
     """Helper function to get DWI data for a subject"""
     dwi = subject.get_unique(suffix='dwi', desc='preproc', pipeline='anima_preproc', extension='nii.gz')
-    bval = subject.get_unique(extension='bval')
+    bval = subject.get(extension='bval')[0]
     bvec = subject.get_unique(extension='bvec', desc='preproc')
-    mask = subject.get_unique(suffix='mask', label='brain', space='B0')
+    mask = subject.get_unique(suffix='mask', label='brain', datatype='dwi')
     return dwi, bval, bvec, mask
 
 def init_pipeline(subject, pipeline, **kwargs):
@@ -41,11 +47,17 @@ def init_pipeline(subject, pipeline, **kwargs):
 def process_response(subject, dwi_data, pipeline, **kwargs):
     """Calculate tissue response functions"""
     dwi, bval, bvec, mask = dwi_data
+    if already_done(subject, pipeline, {'suffix':'response', 'label':'WM'}) and not kwargs.get('force', False):
+        print("Response functions already exist, skipping computation.")
+        return
     res_dict = get_tissue_responses(dwi, bval, bvec, mask, inverse_bvec=True, **kwargs)
     copy_from_dict(subject, res_dict, pipeline=pipeline)
 
 def process_fod(subject, dwi_data, pipeline, **kwargs):
     """Run MSMT-CSD to calculate fiber orientation distributions"""
+    if already_done(subject, pipeline, {'suffix':'fod', 'label':'WM'}) and not kwargs.get('force', False):
+        print("FODs already exist, skipping computation.")
+        return
     dwi, bval, bvec, mask = dwi_data
     csf_response = subject.get_unique(label='CSF', suffix='response', pipeline=pipeline)
     gm_response = subject.get_unique(label='GM', suffix='response', pipeline=pipeline)
@@ -66,6 +78,9 @@ def process_fod(subject, dwi_data, pipeline, **kwargs):
 
 def process_normalize(subject, pipeline, **kwargs):
     """Normalize FODs"""
+    if already_done(subject, pipeline, {'suffix':'fod', 'label':'WM', 'desc':'normalized'}) and not kwargs.get('force', False):
+        print("Normalized FODs already exist, skipping computation.")
+        return
     wm_fod = subject.get_unique(label='WM', suffix='fod', pipeline=pipeline, desc='preproc')
     gm_fod = subject.get_unique(label='GM', suffix='fod', pipeline=pipeline, desc='preproc')
     csf_fod = subject.get_unique(label='CSF', suffix='fod', pipeline=pipeline, desc='preproc')
@@ -75,6 +90,9 @@ def process_normalize(subject, pipeline, **kwargs):
 
 def process_fixels(subject, pipeline, **kwargs):
     """Perform fixel-based analysis"""
+    if already_done(subject, pipeline, {'extension':'fixel', 'label':'WM'}) and not kwargs.get('force', False):
+        print("Fixels already exist, skipping computation.")
+        return
     wm_fod = subject.get_unique(label='WM', model='fod', pipeline=pipeline, desc='preproc', suffix='fod')
     mask = subject.get_unique(suffix='mask', label='brain', space='B0')
     res_dict = fod_to_fixels(fod=wm_fod, mask=mask, max_peaks=CLIArg('maxnum', 3), **kwargs)
@@ -96,6 +114,9 @@ def process_peak_density(subject, pipeline, **kwargs):
 
 def process_fixels2peaks(subject, pipeline, **kwargs):
     """Convert fixels to peaks"""
+    if already_done(subject, pipeline, {'suffix':'peaks', 'label':'WM', 'desc':'fixels2peaks'}) and not kwargs.get('force', False):
+        print("Fixel peaks already exist, skipping computation.")
+        return
     fixels = subject.get_unique(extension='fixel', label='WM', pipeline=pipeline)
     peaks = fixel_to_peaks(fixels, **kwargs)
     print(peaks)
@@ -105,6 +126,9 @@ def process_fixels2peaks(subject, pipeline, **kwargs):
 
 def process_fixel_density(subject, pipeline, **kwargs):
     """Calculate density from fixel peaks"""
+    if already_done(subject, pipeline, {'suffix':'density', 'label':'WM', 'desc':'fixel'}) and not kwargs.get('force', False):
+        print("Fixel density already exist, skipping computation.")
+        return
     fixel_peaks = subject.get_unique(suffix='peaks', label='WM', pipeline=pipeline, desc='fixels2peaks')
     fixel_density = get_peak_density(fixel_peaks, **kwargs)
     entities = upt_dict(fixel_peaks.get_entities(), suffix='density', extension='nii.gz', pipeline=pipeline)
@@ -112,6 +136,9 @@ def process_fixel_density(subject, pipeline, **kwargs):
 
 def process_ifod2_tracto(subject, pipeline, **kwargs):
     """Run iFOD2 tractography"""
+    if already_done(subject, pipeline, {'suffix':'tracto', 'algo':'ifod2'}) and not kwargs.get('force', False):
+        print("iFOD2 tractography already exist, skipping computation.")
+        return
     odf = subject.get_unique(suffix='fod', label='WM', desc='preproc', pipeline=pipeline)
     seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
     tracto = generate_ifod2_tracto(odf, seeds, **kwargs)
@@ -122,7 +149,7 @@ def process_trekker_tracto(subject, pipeline, **kwargs):
     odf = subject.get_unique(suffix='fod', label='WM', desc='preproc', pipeline=pipeline)
     seeds = subject.get_unique(suffix='mask', label='brain', space='B0')
     tracto = generate_trekker_tracto_tck(odf,seeds, **kwargs)
-    copy_from_dict(subject, tracto, pipeline=pipeline,datatype='tracto',algo='trekker')
+    copy_from_dict(subject, tracto, pipeline='trekker',datatype='tracto',algo='trekker')
 
 
 def process_msmt_csd(subject):
@@ -141,16 +168,16 @@ def process_msmt_csd(subject):
 
     # Define processing steps
     pipeline_list = [
-        # 'init',
-        # 'response',
-        # 'fod',
-        # 'normalize',
+        'init',
+        'response',
+        'fod',
+        'normalize',
         'fixels',
         # 'peaks',
         # 'peak_density',
         'fixels2peaks',
         "fixel_density",
-        # 'ifod2_tracto',
+        'ifod2_tracto',
         # 'trekker_tracto'
     ]
     
@@ -192,19 +219,26 @@ if __name__ == "__main__":
     print("MSMT-CSD pipeline")
     print("=====================================")
     print('Reading dataset')
-    # ds = Actidep('/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids')
+
+    amynet='/home/ndecaux/NAS_EMPENN/share/projects/amynet/bids'
+    actidep='/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids'
+
+    ds = Actidep(amynet)
     # ds = Actidep('/home/ndecaux/Code/Data/dysdiago')
-    ds = Actidep('/home/ndecaux/NAS_EMPENN/share/projects/actidep/IRM_Cerveau_MOI/bids')
+    # ds = Actidep('/home/ndecaux/NAS_EMPENN/share/projects/actidep/IRM_Cerveau_MOI/bids')
     print(f"Found {len(ds.subject_ids)} subjects")
     print("=====================================")
     for sub in ds.subject_ids:
+
         subject = ds.get_subject(sub)
-        if len(subject.get(suffix='tracto', algo='ifod2', pipeline='msmt_csd', extension='tck')) == 1:
-            print(f"Skipping subject {sub} as tractography already exists")
+        # if len(subject.get(suffix='tracto', algo='ifod2', pipeline='msmt_csd', extension='tck')) == 1:
+        #     print(f"Skipping subject {sub} as tractography already exists")
             # continue
         print(f"Processing subject: {sub}")
-        process_msmt_csd(subject)
-
+        try:
+            process_msmt_csd(subject)
+        except Exception as e:
+            print(f"Error processing subject {sub}: {e}")
     # sub = Subject('00001','/home/ndecaux/Code/Data/comascore')
     # process_msmt_csd(sub)
     

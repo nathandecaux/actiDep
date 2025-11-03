@@ -11,7 +11,7 @@ import zipfile
 import shutil
 import tempfile
 import json
-
+from copy import deepcopy
 
 class FixelFile:
     """
@@ -268,17 +268,22 @@ def copy_list(dest, file_list):
     
 def remove_temp_dir(res_dict):
     """
-    Remove the temporary directory of the result dictionary.
+    Remove the temporary directory of the result dictionary if it exists and is not empty.
     """
 
     if not res_dict:
         return
     first_key = list(res_dict.keys())[0]
     temp_dir = str(pathlib.Path(first_key).parent)
-    shutil.rmtree(temp_dir)
+    if os.path.exists(temp_dir) and os.path.isdir(temp_dir):
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            print(f"Error removing temporary directory {temp_dir}: {e}")
+            pass
     
 
-def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False, **kwargs):
+def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False,remove_after_copy=True, **kwargs):
     """
     Copy files from a dictionary to the BIDS dataset.
     eg file_dict : 
@@ -291,15 +296,28 @@ def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False, **kwargs):
     }
     """
     mapping={}
+
     #Drop original_name entitie if it is in kwargs
     #drop pipeline if in kwargs and is not None
     if 'pipeline' in kwargs and pipeline is not None:
         del kwargs['pipeline']
+
+    global_pipeline = pipeline
     
-    for src_file, entities in file_dict.items():
+    for src_file, src_entities in file_dict.items():
+        pipeline = global_pipeline
+        if src_file is None or not os.path.exists(src_file):
+            print(f"Source file {src_file} does not exist. Skipping.")
+            continue
+        entities= deepcopy(src_entities)
         entities.update(kwargs)
-        if 'pipeline' in entities.keys() and pipeline is not None:
+        if 'pipeline' in entities.keys() and global_pipeline is not None:
             del entities['pipeline']
+        
+        if 'pipeline' in entities.keys() and global_pipeline is None:
+            pipeline = deepcopy(entities['pipeline'])
+            del entities['pipeline']
+
         dest_file = subject.build_path(
             original_name=os.path.basename(src_file), **entities, pipeline=pipeline)
         if not dry_run:
@@ -307,6 +325,6 @@ def copy_from_dict(subject, file_dict, pipeline=None,dry_run=False, **kwargs):
         else:
             print(f"Copying {src_file} to {dest_file}")
         mapping[src_file] = dest_file
-    
-    remove_temp_dir(file_dict)
+    if remove_after_copy:
+        remove_temp_dir(file_dict)
     return mapping

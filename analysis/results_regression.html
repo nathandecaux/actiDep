@@ -1,0 +1,211 @@
+<h2>AMI : corrélation avec les scores</h2>
+<hr>
+<h3>Significativité des différences (test) :</h3>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>feature</th>
+      <th>pearson_corr</th>
+      <th>pearson_pval</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>acti_inactivity_min_12h_6</td>
+      <td>0.391896</td>
+      <td>0.026536</td>
+    </tr>
+    <tr>
+      <td>acti_walk_fft_mean_12h_1</td>
+      <td>-0.379827</td>
+      <td>0.032015</td>
+    </tr>
+    <tr>
+      <td>acti_inactivity_max_12h_1</td>
+      <td>0.369855</td>
+      <td>0.037205</td>
+    </tr>
+    <tr>
+      <td>acti_walk_max_12h_6</td>
+      <td>-0.366615</td>
+      <td>0.039031</td>
+    </tr>
+    <tr>
+      <td>acti_freq_mean_12h_6</td>
+      <td>-0.366144</td>
+      <td>0.039303</td>
+    </tr>
+    <tr>
+      <td>acti_walk_fft_min_12h_3</td>
+      <td>0.352708</td>
+      <td>0.047705</td>
+    </tr>
+  </tbody>
+</table>
+<br>
+<h3>Scores moyens (%) :</h3>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>model</th>
+      <th>mae</th>
+      <th>r2</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MLP</td>
+      <td>9.1</td>
+      <td>-2.2</td>
+    </tr>
+    <tr>
+      <td>DT</td>
+      <td>7.4</td>
+      <td>-1.7</td>
+    </tr>
+    <tr>
+      <td>RandomForest</td>
+      <td>6.2</td>
+      <td>-0.5</td>
+    </tr>
+    <tr>
+      <td>GradientBoosting</td>
+      <td>6.7</td>
+      <td>-0.9</td>
+    </tr>
+    <tr>
+      <td>Ada</td>
+      <td>6.3</td>
+      <td>-0.7</td>
+    </tr>
+  </tbody>
+</table>
+<br><br>
+<h2>AES : corrélation avec les scores</h2>
+<hr>
+<h3>Significativité des différences (test) :</h3>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>feature</th>
+      <th>pearson_corr</th>
+      <th>pearson_pval</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>acti_activity_rate_3d</td>
+      <td>-0.626362</td>
+      <td>0.000057</td>
+    </tr>
+    <tr>
+      <td>acti_walk_min_12h_6</td>
+      <td>-0.496145</td>
+      <td>0.002436</td>
+    </tr>
+    <tr>
+      <td>acti_inactivity_min_12h_1</td>
+      <td>0.469219</td>
+      <td>0.004462</td>
+    </tr>
+    <tr>
+      <td>acti_walk_max_12h_6</td>
+      <td>-0.466201</td>
+      <td>0.004761</td>
+    </tr>
+    <tr>
+      <td>acti_inactivity_max_12h_1</td>
+      <td>0.459808</td>
+      <td>0.005453</td>
+    </tr>
+    <tr>
+      <td>acti_inactivity_mean_12h_1</td>
+      <td>0.453495</td>
+      <td>0.006218</td>
+    </tr>
+    <tr>
+      <td>acti_activity_max_12h_6</td>
+      <td>-0.440997</td>
+      <td>0.008009</td>
+    </tr>
+    <tr>
+      <td>acti_walk_mean_12h_6</td>
+      <td>-0.417124</td>
+      <td>0.012670</td>
+    </tr>
+    <tr>
+      <td>acti_freq_max_12h_3</td>
+      <td>-0.394551</td>
+      <td>0.019003</td>
+    </tr>
+    <tr>
+      <td>acti_activity_mean_12h_6</td>
+      <td>-0.389372</td>
+      <td>0.020779</td>
+    </tr>
+    <tr>
+      <td>acti_freq_std_12h_3</td>
+      <td>0.388926</td>
+      <td>0.020938</td>
+    </tr>
+    <tr>
+      <td>acti_inactivity_mean_12h_2</td>
+      <td>-0.385281</td>
+      <td>0.022277</td>
+    </tr>
+    <tr>
+      <td>acti_inactivity_min_3d</td>
+      <td>0.365053</td>
+      <td>0.031061</td>
+    </tr>
+    <tr>
+      <td>acti_activity_min_12h_3</td>
+      <td>-0.360165</td>
+      <td>0.033562</td>
+    </tr>
+    <tr>
+      <td>acti_activity_mean_12h_1</td>
+      <td>-0.335237</td>
+      <td>0.048994</td>
+    </tr>
+  </tbody>
+</table>
+<br>
+<h3>Scores moyens (%) :</h3>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>model</th>
+      <th>mae</th>
+      <th>r2</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MLP</td>
+      <td>18.3</td>
+      <td>-4.2</td>
+    </tr>
+    <tr>
+      <td>DT</td>
+      <td>7.1</td>
+      <td>0.1</td>
+    </tr>
+    <tr>
+      <td>RandomForest</td>
+      <td>6.3</td>
+      <td>0.3</td>
+    </tr>
+    <tr>
+      <td>GradientBoosting</td>
+      <td>6.6</td>
+      <td>0.2</td>
+    </tr>
+    <tr>
+      <td>Ada</td>
+      <td>7.2</td>
+      <td>0.2</td>
+    </tr>
+  </tbody>
+</table>
+<br><br>

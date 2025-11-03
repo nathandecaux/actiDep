@@ -43,6 +43,7 @@ from dipy.tracking.streamline import transform_streamlines
 from dipy.io.stateful_tractogram import StatefulTractogram, Space
 import dipy
 from dipy.align import affine_registration
+from subprocess import call
 
 def create_whole_brain_tract(tract_list, ref_image=None, **kwargs):
     """
@@ -280,6 +281,7 @@ def register_anat_to_template(subject, template_path, tractogram, atlas_name='re
     }
 
     ants_registration(moving=subject, static=template_path)
+    
 
 def register_anat_subject_to_template(subject, template_path, tractogram, atlas_name='ref', **kwargs):
     """
@@ -547,11 +549,68 @@ def process_bundleseg(streamlines_file, fa_file, atlas_dir='/home/ndecaux/Data/S
     
     return res_dict
 
+
+def process_tractosearch(streamlines_file, models_dict, radius, **kwargs):
+    """
+    Call the TractoSearch algorithm on the given streamlines file.
+
+    Parameters
+    ----------
+    streamlines_file : ActiDepFile
+        ActiDepFile object containing the streamlines to segment
+    models_dict : dict
+        Dictonnary of paths to the model file or ActiDepFile objects. Keys are bundle names.
+    radius : float or dict
+        Radius for the nearest neighbor search. If dict, keys are bundle names and values are radius for each bundle.
+
+    kwargs : dict
+        Additional arguments to pass"
+    """
+
+    cmd = ['tractosearch_nearest_in_radius.py', streamlines_file.path if isinstance(streamlines_file, str) else streamlines_file.path]
+    for bundle_name, model_file in models_dict.items():
+        model_path = model_file if isinstance(model_file, str) else model_file.path
+        cmd.append(model_path)
     
+    if 'in_nii' in kwargs:
+        cmd.extend(['--in_nii', kwargs.pop('in_nii') if isinstance(kwargs['in_nii'], str) else kwargs['in_nii'].path])
+
+    if 'ref_nii' in kwargs:
+        cmd.extend(['--ref_nii', kwargs.pop('ref_nii') if isinstance(kwargs['ref_nii'], str) else kwargs['ref_nii'].path])
+
+    temp_dir = tempfile.mkdtemp()
+    cmd.extend(['--mean_distance',str(radius),'--out_folder', temp_dir])
+
+    print("Running command:", ' '.join(cmd))
+    call(cmd)
+
+    entities=streamlines_file.get_entities()
+    entities.update(kwargs)
+
+    trks = glob.glob(os.path.join(temp_dir, "*.trk"))
+    print(trks)
+    #trk files contains the original model filename 
+    res_dict={}
+    for bundle, model_path in models_dict.items():
+        model_path_str = model_path if isinstance(model_path, str) else model_path.path
+        model_filename = os.path.basename(model_path_str)
+        matched_trk = [trk for trk in trks if bundle in os.path.basename(trk)]
+        if len(matched_trk) == 0:
+            print(f"No matching tract found for model {model_filename} in output folder {temp_dir}")
+            continue
+        elif len(matched_trk) > 1:
+            print(f"Multiple matching tracts found for model {model_filename} in output folder {temp_dir}, taking the first one")
+        matched_trk = matched_trk[0]
+        res_dict[matched_trk] = upt_dict(entities, {
+            "bundle": bundle,
+            "extension": "trk"
+        })
+
+    return res_dict
 
 if __name__ == "__main__":
     config, tools = set_config()
-    sub = Subject("03011")
+    sub = Subject("02",'/home/ndecaux/NAS_EMPENN/share/projects/amynet/bids')
 
     # Exemple d'utilisation :
     # models_path = "/path/to/models"
@@ -570,6 +629,14 @@ if __name__ == "__main__":
     # save_trk(whole_brain_tract, "whole_brain_tract.trk")
 
     # HCP_tract_root = "/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat"
-    HCP_tract_root = "/data/HCP_Data/HCP105_Zenodo"
-    HCP_anat_root = "/data/HCP_Data/Structural_Data_Preprocessed"
-    create_HCP_whole_brain_tract(HCP_tract_root, HCP_anat_root,HCP_tract_root_dest="/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat",n_jobs=8)
+    # HCP_tract_root = "/data/HCP_Data/HCP105_Zenodo"
+    # HCP_anat_root = "/data/HCP_Data/Structural_Data_Preprocessed"
+    # create_HCP_whole_brain_tract(HCP_tract_root, HCP_anat_root,HCP_tract_root_dest="/home/ndecaux/NAS_EMPENN/share/projects/HCP105_Zenodo_NewTrkFormat",n_jobs=8)
+
+    #TractoSearch example
+    model_files = sub.get(suffix='tracto', atlas='HCP',bundle='CSTleft')
+    model_dict={m.bundle:m for m in model_files}
+    tracto = sub.get_unique(suffix='tracto', pipeline='msmt_csd', extension='tck')
+    in_nii = sub.get_unique(suffix='dwi', datatype='dwi', metric='FA',pipeline='anima_preproc')
+    output_dict = process_tractosearch(tracto, model_dict, radius=8.0,in_nii=in_nii, atlas='HCP')
+    pprint(output_dict)

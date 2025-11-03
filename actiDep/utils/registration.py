@@ -78,14 +78,15 @@ def ants_registration(moving, fixed, outprefix='registered',transform_type='affi
         command_args += ["-t", "a"]
         output_pattern.pop(f"{outprefix}1Warp.nii.gz", None)
         output_pattern.pop(f"{outprefix}1InverseWarp.nii.gz", None)
-    elif transform_type == 'syn':
+    elif transform_type == 'syn' or transform_type == 'synquick':
         command_args += ["-t", "s"]
     #Add the suffix of the keys in the output_pattern as a desc entity
     output_pattern = {k: upt_dict(v, {"desc": k.split(outprefix)[1].split('.')[0],"trans":transform_type}) for k, v in output_pattern.items()}
 
+    main_cmd= "antsRegistrationSyN.sh" if 'quick' in transform_type.lower() else "antsRegistrationSyN.sh"
     # Run the command
     res_dict =  run_cli_command(
-        "antsRegistrationSyNQuick.sh",
+        main_cmd,
         inputs,
         output_pattern,
         base_entities,

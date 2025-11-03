@@ -6,7 +6,7 @@ import SimpleITK as sitk
 import re
 from os.path import join as opj
 from actiDep.data.io import copy2nii, move2nii, parse_filename
-
+import pandas as pd
 _SENTINEL = object()  # Défini au niveau du module
 
 class LayoutProxy:
@@ -111,7 +111,113 @@ class ActiDepFile:
 
     def __str__(self):
         return self.path
-
+    
+    @property
+    def age(self):
+        try:
+            return os.path.getmtime(self.path)
+        except Exception:
+            return None
+    @property
+    def df(self):
+        """Retourner un DataFrame pandas à une seule ligne avec les entités et propriétés."""
+        data = dict(self.entities)
+        
+        for attr in ['path', 'age']:
+            val = getattr(self, attr, None)
+            if val is not None:
+                data[attr] = val
+        return pd.DataFrame([data])
+    
+    def update_entities(self, **new_entities):
+        """Mettre à jour les entités du fichier, et recalculer le chemin si nécessaire et renommer le fichier."""
+        # 1. Mettre à jour les entités
+        for key, value in new_entities.items():
+            if value is None:
+                # Supprimer l'entité si la valeur est None
+                self.entities.pop(key, None)
+            else:
+                self.entities[key] = value
+        
+        # 2. Reconstruire le nom de fichier basé sur les entités
+        # Extraire le sujet depuis le chemin ou les entités
+        subject = self.entities.get('subject')
+        if not subject:
+            match_sub = re.search(r'/sub-([A-Za-z0-9]+)/', self.path)
+            if match_sub:
+                subject = match_sub.group(1)
+        
+        if not subject:
+            raise ValueError("Impossible de déterminer le sujet pour reconstruire le chemin")
+        
+        # Extraire les informations de base du chemin actuel
+        session = self.entities.get('session')
+        datatype = self.entities.get('datatype')
+        pipeline = self.entities.get('pipeline')
+        suffix = self.entities.get('suffix')
+        extension = self.entities.get('extension', '')
+        derivative = self.entities.get('derivative', False)
+        
+        # Déterminer le répertoire de base
+        if derivative and pipeline:
+            base_dir = opj(os.path.dirname(self.path).split('/derivatives/')[0], 
+                          'derivatives', pipeline, f'sub-{subject}')
+        else:
+            base_dir = opj(os.path.dirname(self.path).split(f'/sub-{subject}')[0], 
+                          f'sub-{subject}')
+        
+        # Ajouter session si présente
+        if session:
+            base_dir = opj(base_dir, f'ses-{session}')
+        
+        # Ajouter datatype
+        if datatype:
+            base_dir = opj(base_dir, datatype)
+        
+        # Construire le nouveau nom de fichier
+        name_parts = [f'sub-{subject}']
+        if session:
+            name_parts.append(f'ses-{session}')
+        
+        # Ajouter les entités (sauf les réservées) triées alphabétiquement
+        reserved = {'subject', 'session', 'datatype', 'pipeline', 'extension', 
+                   'suffix', 'derivative', 'path'}
+        entity_parts = []
+        for key in sorted(self.entities.keys()):
+            if key not in reserved and '_' not in key:
+                value = self.entities[key]
+                if value is not None:
+                    try:
+                        # Vérifier si ce n'est pas NaN
+                        if value == value:
+                            entity_parts.append(f'{key}-{value}')
+                    except Exception:
+                        entity_parts.append(f'{key}-{value}')
+        
+        name_parts.extend(entity_parts)
+        
+        # Ajouter le suffix
+        if suffix:
+            name_parts.append(suffix)
+        
+        # Construire le nom complet
+        new_filename = '_'.join(name_parts) + extension
+        new_path = opj(base_dir, new_filename)
+        
+        # 3. Renommer le fichier si le chemin a changé
+        if new_path != self.path:
+            # Créer le répertoire si nécessaire
+            pathlib.Path(os.path.dirname(new_path)).mkdir(parents=True, exist_ok=True)
+            
+            # Renommer le fichier
+            if os.path.exists(self.path):
+                os.rename(self.path, new_path)
+            
+            # Mettre à jour le chemin interne
+            self.path = new_path
+            self.filename = os.path.basename(new_path)
+        
+        return self.path
 class Subject:
     """
     Sujet léger basé uniquement sur le DataFrame global de Actidep.
@@ -130,6 +236,11 @@ class Subject:
         if self.parent_actidep is None:
             self.parent_actidep = Actidep(self.db_root)
         df = self.parent_actidep.build_dataframe()
+        #if kwargs entities are not in df columns, add this column with all None values to avoid KeyError
+        for k in kwargs.keys():
+            if k not in df.columns:
+                df[k] = None
+
         if df.empty:
             return []
         sub_df = df[df['subject'] == self.sub_id]
@@ -225,12 +336,16 @@ class Subject:
             else:
                 if original_name and (extension in ('.nii.gz', '.nii', '.gz') or extension in ('', None)):
                     parts = original_name.split('.')
-                    if len(parts) > 2 and parts[-2].lower() == 'nii' and parts[-1].lower() == 'gz':
+                    if parts[-1]=='nrrd':
                         resolved_ext = '.nii.gz'
-                    elif len(parts) > 1:
-                        resolved_ext = '.' + parts[-1]
                     else:
-                        resolved_ext = extension if (extension.startswith('.') if extension else False) else (f'.{extension}' if extension else '')
+                        if len(parts) > 2 and parts[-2].lower() == 'nii' and parts[-1].lower() == 'gz':
+                            resolved_ext = '.nii.gz'
+                        elif len(parts) > 1:
+                            resolved_ext = '.' + parts[-1]
+                        
+                        else:
+                            resolved_ext = extension if (extension.startswith('.') if extension else False) else (f'.{extension}' if extension else '')
                 else:
                     resolved_ext = extension if extension.startswith('.') else f'.{extension}' if extension else ''
 
@@ -493,6 +608,9 @@ class Actidep:
         self._subjects_cache[sub_id] = subj
         return subj
 
+    def get_subjects(self):
+        return self.subject_ids
+    
     def to_dataframe(self):
         return self.build_dataframe()
 
