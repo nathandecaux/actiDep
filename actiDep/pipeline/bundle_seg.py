@@ -702,7 +702,7 @@ if __name__ == "__main__":
         #also set the TMPDIR env variable
         os.environ['TMPDIR'] = tempfile.tempdir
     else:
-        num_processes = 1
+        num_processes = 12
         print(f"Not calcarine, using {num_processes} processes")
         tempfile.tempdir = '/home/ndecaux/bundle_seg'
         os.environ['TMPDIR'] = tempfile.tempdir
@@ -716,7 +716,10 @@ if __name__ == "__main__":
     # subject = Subject('100206',db_root='/home/ndecaux/Data/HCP/')
 
     # dataset_path = '/home/ndecaux/Code/Data/comascore'
-    dataset_path = '/home/ndecaux/NAS_EMPENN/share/projects/amynet/bids'
+    # dataset_path = '/home/ndecaux/NAS_EMPENN/share/projects/amynet/bids'
+
+    dataset_path = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids'
+
     # dataset_path = '/home/ndecaux/Code/Data/dysdiago'
     # dataset_path='/home/ndecaux/NAS_EMPENN/share/projects/actidep/IRM_Cerveau_MOI/bids'
     ds = Actidep(dataset_path)

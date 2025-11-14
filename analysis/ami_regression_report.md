@@ -1,6 +1,6 @@
 # Rapport d'analyse de régression - AMI
 
-Date de génération : 2025-10-01 10:25:33
+Date de génération : 2025-11-14 11:07:01
 
 ## Résumé de l'analyse
 
@@ -69,29 +69,29 @@ Date de génération : 2025-10-01 10:25:33
 
 | Type Features | Modèle | R² | RMSE | MAE |
 |---------------|--------|----|----- |----|
-| 12h | RandomForest | -0.7425 | 7.3411 | 6.3817 |
-| 12h | Ada | -1.1663 | 8.1913 | 6.9241 |
+| 12h | RandomForest | -0.7271 | 7.3097 | 6.3563 |
+| 12h | MLP | -0.9716 | 7.5830 | 6.6772 |
+| 12h | Ada | -1.2057 | 7.9921 | 6.6131 |
 | 12h | GradientBoosting | -1.6820 | 8.5552 | 7.2407 |
-| 12h | DT | -3.5601 | 11.1635 | 9.6381 |
-| 12h | MLP | -3.9545 | 12.8606 | 11.5365 |
-| 3d | RandomForest | -0.9380 | 8.4277 | 7.0747 |
-| 3d | Ada | -1.1749 | 8.9818 | 7.4782 |
+| 12h | DT | -3.6267 | 11.1710 | 9.6206 |
+| 3d | RandomForest | -0.9662 | 8.4802 | 7.1426 |
+| 3d | Ada | -1.3443 | 9.2218 | 7.5237 |
+| 3d | MLP | -1.3892 | 9.3837 | 7.4955 |
 | 3d | GradientBoosting | -1.6632 | 9.6852 | 7.8229 |
-| 3d | DT | -1.9960 | 9.8206 | 8.2524 |
-| 3d | MLP | -7.1780 | 16.3785 | 14.7594 |
-| combined | RandomForest | -0.4973 | 7.1525 | 6.1739 |
-| combined | Ada | -0.7160 | 7.5682 | 6.3367 |
+| 3d | DT | -2.3511 | 10.3851 | 8.6145 |
+| combined | RandomForest | -0.4946 | 7.1435 | 6.1611 |
+| combined | Ada | -0.7337 | 7.5782 | 6.4474 |
 | combined | GradientBoosting | -0.9209 | 7.7691 | 6.7034 |
-| combined | DT | -1.7199 | 9.5135 | 7.3667 |
-| combined | MLP | -2.2070 | 10.6235 | 9.0808 |
+| combined | MLP | -1.4603 | 9.3779 | 7.9627 |
+| combined | DT | -2.7022 | 10.8319 | 8.7822 |
 
 ### Meilleur modèle global
 
 **Modèle :** RandomForest
 **Type de features :** combined
-**R² :** -0.4973
-**RMSE :** 7.1525
-**MAE :** 6.1739
+**R² :** -0.4946
+**RMSE :** 7.1435
+**MAE :** 6.1611
 
 ### Statistiques de sélection des features
 

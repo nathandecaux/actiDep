@@ -1,6 +1,6 @@
 # Rapport global d'analyse des features
 
-Date de génération : 2025-10-01 10:25:35
+Date de génération : 2025-11-14 10:20:11
 
 ## Résumé des tâches
 
@@ -9,7 +9,7 @@ Date de génération : 2025-10-01 10:25:35
 - **Apathy vs Non-apathy** (apathy)
 
 ### Tâches de régression/corrélation
-- **AMI**: 6/181 corrélations significatives, meilleur modèle: RandomForest (combined, R²=-0.497)
-- **AES**: 15/181 corrélations significatives, meilleur modèle: RandomForest (combined, R²=0.326)
+- **AMI**: 6/181 corrélations significatives, meilleur modèle: RandomForest (combined, R²=-0.495)
+- **AES**: 15/181 corrélations significatives, meilleur modèle: RandomForest (combined, R²=0.321)
 
 Voir les rapports détaillés pour chaque tâche dans les fichiers séparés.

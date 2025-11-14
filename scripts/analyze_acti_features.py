@@ -733,6 +733,120 @@ def ols_residualize(y, X):
     except Exception:
         return y
 
+def save_significant_features_to_json(ttest_report_12h, ttest_report_3d, feature_details_12h, feature_details_3d,
+                                     selected_12h, selected_3d, correlation_results, res_dir, task_name):
+    """Sauvegarde les features significatives dans un fichier JSON."""
+    
+    # Features significatives au t-test
+    significant_12h_ttest = [r['feature'] for r in ttest_report_12h if r['keep']]
+    significant_3d_ttest = [r['feature'] for r in ttest_report_3d if r['keep']]
+    
+    # Top features par performance F1
+    top_features_12h = sorted(feature_details_12h, key=lambda x: x['avg_f1_score'], reverse=True)[:10]
+    top_features_3d = sorted(feature_details_3d, key=lambda x: x['avg_f1_score'], reverse=True)[:10]
+    
+    significant_data = {
+        'task': task_name,
+        'generation_date': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'classification': {
+            'ttest_significant': {
+                '12h': {
+                    'count': len(significant_12h_ttest),
+                    'features': significant_12h_ttest
+                },
+                '3d': {
+                    'count': len(significant_3d_ttest),
+                    'features': significant_3d_ttest
+                }
+            },
+            'selected_for_modeling': {
+                '12h': {
+                    'count': len(selected_12h),
+                    'features': selected_12h
+                },
+                '3d': {
+                    'count': len(selected_3d),
+                    'features': selected_3d
+                },
+                'combined': {
+                    'count': len(selected_12h) + len(selected_3d),
+                    'features': selected_12h + selected_3d
+                }
+            },
+            'top_performers': {
+                '12h': [
+                    {
+                        'feature_name': f['feature_name'],
+                        'f1_score': f['avg_f1_score'],
+                        'type': f['type'],
+                        'num_features': len(f['feature_cols'])
+                    }
+                    for f in top_features_12h
+                ],
+                '3d': [
+                    {
+                        'feature_name': f['feature_name'],
+                        'f1_score': f['avg_f1_score'],
+                        'type': f['type'],
+                        'num_features': len(f['feature_cols'])
+                    }
+                    for f in top_features_3d
+                ]
+            }
+        }
+    }
+    
+    # Ajouter les résultats de corrélation si disponibles
+    if correlation_results:
+        significant_data['regression'] = {}
+        for target, reg_data in correlation_results.items():
+            correlations = reg_data.get('correlations', [])
+            selected_features = reg_data.get('selected_features', {})
+            
+            significant_corr = [r for r in correlations if r['significant_pearson']]
+            
+            significant_data['regression'][target] = {
+                'significant_correlations': {
+                    'count': len(significant_corr),
+                    'features': [
+                        {
+                            'feature': r['feature'],
+                            'pearson_corr': r['pearson_corr'],
+                            'pearson_pval': r['pearson_pval'],
+                            'spearman_corr': r['spearman_corr'],
+                            'spearman_pval': r['spearman_pval']
+                        }
+                        for r in sorted(significant_corr, key=lambda x: abs(x['pearson_corr']), reverse=True)
+                    ]
+                },
+                'selected_for_modeling': {
+                    '12h': {
+                        'count': len(selected_features.get('12h', [])),
+                        'features': selected_features.get('12h', [])
+                    },
+                    '3d': {
+                        'count': len(selected_features.get('3d', [])),
+                        'features': selected_features.get('3d', [])
+                    }
+                },
+                'top_correlations': [
+                    {
+                        'feature': r['feature'],
+                        'pearson_corr': r['pearson_corr'],
+                        'pearson_pval': r['pearson_pval']
+                    }
+                    for r in correlations[:20]
+                ]
+            }
+    
+    # Sauvegarder en JSON
+    output_file = Path(res_dir) / f'{task_name}_significant_features.json'
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(significant_data, f, indent=2, ensure_ascii=False)
+    
+    print(f"Features significatives sauvegardées dans : {output_file}")
+    return output_file
+
 def run_task(df, feature_cols, target_col, res_dir='/home/ndecaux/Code/actiDep/analysis'):
     """Exécute la tâche binaire demandée avec sélection des meilleures features par LOO."""
     # Créer le dossier de résultats s'il n'existe pas
@@ -779,6 +893,11 @@ def run_task(df, feature_cols, target_col, res_dir='/home/ndecaux/Code/actiDep/a
     
     if combined_results:
         save_combined_results_to_csv(combined_results, res_dir, task_name)
+    
+    # Sauvegarder les features significatives en JSON
+    save_significant_features_to_json(ttest_report_12h, ttest_report_3d, feature_details_12h, feature_details_3d,
+                                     selected_12h, selected_3d, None, res_dir, task_name)
+    
     generate_markdown_report(ttest_report_12h, ttest_report_3d, feature_details_12h, feature_details_3d,
                            results_12h, results_3d, selected_12h, selected_3d, res_dir, task_name,
                            combined_results=combined_results)
@@ -1156,57 +1275,59 @@ def main(df):
         print("Analyse AMI en cours...")
         ami_analysis = analyze_regression_correlation(df, feature_cols, 'ami', res_dir)
         regression_results['ami'] = ami_analysis
+        
+        # Sauvegarder les features significatives pour AMI
+        save_significant_features_to_json([], [], [], [], [], [], 
+                                         {'ami': ami_analysis}, res_dir, 'ami_regression')
     
     # Analyse AES  
     if 'aes' in df.columns:
         print("Analyse AES en cours...")
         aes_analysis = analyze_regression_correlation(df, feature_cols, 'aes', res_dir)
         regression_results['aes'] = aes_analysis
-    
-    # Générer un rapport global incluant les corrélations et modèles
-    if regression_results:
-        global_report_lines = [
-            "# Rapport global d'analyse des features",
-            "",
-            f"Date de génération : {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "",
-            "## Résumé des tâches",
-            "",
-            "### Tâches de classification",
-            "- **Depressed vs Control** (group)",
-            "- **Apathy vs Non-apathy** (apathy)",
-            "",
-            "### Tâches de régression/corrélation",
-        ]
         
+        # Sauvegarder les features significatives pour AES
+        save_significant_features_to_json([], [], [], [], [], [], 
+                                         {'aes': aes_analysis}, res_dir, 'aes_regression')
+    
+    # Générer un JSON global avec toutes les features significatives
+    if regression_results or 'depressed_vs_control' in results or 'apathy_vs_nonapathy' in results:
+        global_significant = {
+            'generation_date': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'tasks': {}
+        }
+        
+        # Ajouter les résultats de classification
+        for task_name in ['depressed_vs_control', 'apathy_vs_nonapathy']:
+            if task_name in results:
+                task_data = results[task_name]
+                global_significant['tasks'][task_name] = {
+                    'type': 'classification',
+                    'selected_features_12h': task_data.get('selected_features_12h', []),
+                    'selected_features_3d': task_data.get('selected_features_3d', []),
+                    'n_significant_12h': len([r for r in task_data.get('ttest_report_12h', []) if r['keep']]),
+                    'n_significant_3d': len([r for r in task_data.get('ttest_report_3d', []) if r['keep']])
+                }
+        
+        # Ajouter les résultats de régression
         for target, reg_data in regression_results.items():
             correlations = reg_data.get('correlations', [])
-            significant_count = len([r for r in correlations if r['significant_pearson']])
-            total_count = len(correlations)
+            selected_features = reg_data.get('selected_features', {})
+            significant_corr = [r for r in correlations if r['significant_pearson']]
             
-            # Meilleur modèle global
-            model_results = reg_data.get('model_results', {})
-            best_r2 = -np.inf
-            best_model_info = "N/A"
-            
-            for feature_type, model_list in model_results.items():
-                if model_list:
-                    best_in_type = max(model_list, key=lambda x: x['r2'] if not np.isinf(x['r2']) else -np.inf)
-                    if best_in_type['r2'] > best_r2:
-                        best_r2 = best_in_type['r2']
-                        best_model_info = f"{best_in_type['model']} ({feature_type}, R²={best_r2:.3f})"
-            
-            global_report_lines.append(f"- **{target.upper()}**: {significant_count}/{total_count} corrélations significatives, meilleur modèle: {best_model_info}")
+            global_significant['tasks'][target] = {
+                'type': 'regression',
+                'selected_features_12h': selected_features.get('12h', []),
+                'selected_features_3d': selected_features.get('3d', []),
+                'n_significant_correlations': len(significant_corr),
+                'top_features': [r['feature'] for r in correlations[:10]]
+            }
         
-        global_report_lines.extend([
-            "",
-            "Voir les rapports détaillés pour chaque tâche dans les fichiers séparés.",
-            ""
-        ])
+        global_file = Path(res_dir) / 'global_significant_features.json'
+        with open(global_file, 'w', encoding='utf-8') as f:
+            json.dump(global_significant, f, indent=2, ensure_ascii=False)
         
-        global_report_file = Path(res_dir) / 'global_analysis_report.md'
-        with open(global_report_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(global_report_lines))
+        print(f"JSON global des features significatives sauvegardé dans : {global_file}")
     
     results["regression_analysis"] = regression_results
     return results

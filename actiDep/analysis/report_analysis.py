@@ -10,7 +10,11 @@ pn.extension('tabulator')
 # CSV_PATH = '/home/ndecaux/report_no_actimetry_tractseg/summary_results.csv'
 # CSV_PATH = "/home/ndecaux/report_optimized_no_actimetry_clusterFWE/summary_results.csv"
 # CSV_PATH = "/home/ndecaux/report_optimized_test_multi_no_actimetry_clusterFWE/summary_results.csv"
-CSV_PATH = "/data/ndecaux/report_hcp_association_multiclusters_frechetlong_50pts_no_actimetry_calcarine/summary_results.csv"
+# CSV_PATH = "/data/ndecaux/report_hcp_association_multiclusters_frechetlong_50pts_no_actimetry_calcarine/summary_results.csv"
+# CSV_PATH = "/home/ndecaux/report_amynet_hcp_association_multiclusters_umapendpoints_50pts_no_actimetry_clusterFWE/summary_results.csv"
+CSV_PATH = '/data/ndecaux/report_hcp_association_50pts_actimetry_calcarine/summary_results.csv'
+# CSV_PATH = '/data/ndecaux/report_hcp_association_multiclusters_umapendpoints_50pts_group_only_calcarine/summary_results.csv'
+
 def load_data(path=CSV_PATH):
     df = pd.read_csv(path)
     df['var']  = df['type'].apply(lambda x: '_'.join(x.split('_')[1:]))

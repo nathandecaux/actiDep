@@ -7,7 +7,7 @@ import sys
 pn.extension('tabulator')
 
 # CSV_PATH = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/report_no_actimetry_tractseg/summary_results.csv'
-CSV_PATH = '/data/ndecaux/report_actimetry_calcarine/summary_results.csv'
+CSV_PATH = '/data/ndecaux/report_hcp_association_50pts_actimetry_calcarine/summary_results.csv'
 def load_data(path=CSV_PATH):
     df = pd.read_csv(path)
     df['var']  = df['type'].apply(lambda x: '_'.join(x.split('_')[1:]))

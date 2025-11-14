@@ -1,165 +1,107 @@
+# Imports nettoyés et regroupés (suppression des doublons et imports inutilisés)
 import os
 from os.path import join as opj
-import pandas as pd
-import glob
 import re
-import holoviews as hv
-from holoviews import opts
-hv.extension('bokeh')
-import panel as pn
-# pn.extension('bokeh') # Already called by hv.extension('bokeh')
-import param
-import random  # Ajouter cette importation en haut du fichier
-import numpy as np
-import statsmodels.api as sm 
-from sklearn.linear_model import LinearRegression 
-from tractseg.libs.AFQ_MultiCompCorrection import get_significant_areas # supprimé pour corrélations -> ne plus utilisé
-from tractseg.libs import metric_utils
-from collections import defaultdict
-from actiDep.analysis.afq_optimized import AFQ_MultiCompCorrection
-import numpy as np
-from scipy.ndimage import binary_dilation
-from scipy.ndimage.interpolation import map_coordinates
-from dipy.segment.clustering import QuickBundles
-from dipy.segment.metric import AveragePointwiseEuclideanMetric
-from scipy.spatial import cKDTree
-from dipy.tracking.streamline import Streamlines
-from dipy.tracking.streamline import transform_streamlines
-from dipy.tracking.streamline import values_from_volume
-import dipy.stats.analysis as dsa
+import gc
+from pathlib import Path
+from functools import lru_cache
+from typing import Dict, List, Tuple, Optional
 
-from tractseg.libs import fiber_utils
-from tqdm import tqdm
-import gc  # ajout pour gestion mémoire
-
-#### Custom imports ####
-from pprint import pprint
-import os
-from os.path import join as opj
 import numpy as np
 import pandas as pd
-import sys
-import pathlib
-from subprocess import call
-from actiDep.set_config import set_config,get_HCP_bundle_names
-from actiDep.data.loader import Subject, parse_filename, ActiDepFile, Actidep
-from actiDep.utils.tools import del_key, upt_dict, add_kwargs_to_cli, run_cli_command, run_mrtrix_command
-import SimpleITK as sitk
-import json
-import tempfile
-import glob
-import shutil
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scipy import stats
-import scipy.stats as sp_stats
-import statsmodels.api as sm
-import numpy as np
-import pandas as pd
-from statsmodels.stats.multitest import multipletests
+import seaborn as sns
 
-MULTIPROCESSING=True
+from tqdm import tqdm
+from statsmodels.stats.multitest import multipletests
+import statsmodels.api as sm
+from scipy.stats import ttest_ind, pearsonr
+
+from tractseg.libs.AFQ_MultiCompCorrection import get_significant_areas
+from actiDep.analysis.afq_optimized import AFQ_MultiCompCorrection
+from actiDep.set_config import set_config, get_HCP_bundle_names
+from actiDep.data.loader import Subject, parse_filename, ActiDepFile, Actidep
+
+MULTIPROCESSING = True
 # db_root, ds, csv_files, bundle_names, corr_variables, classif_variables, confond lists
 
-db_root = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids'
+dataset = 'actidep'  # 'actidep' or 'amynet'
+db_root = f'/home/ndecaux/NAS_EMPENN/share/projects/{dataset}/bids'
 
 cache = False
-#If ds_association.pkl already exists, load it instead of re-running the whole pipeline
-
 ds = Actidep(db_root)
 
-hcp_asso_pipeline='hcp_association_multiclusters_frechetlong_50pts'
-
-csv_files = ds.get_global(pipeline=hcp_asso_pipeline,extension='csv',datatype='metric',suffix='mean')
-# from pprint import pprint
-
-# pprint([f.path for f in csv_files if f.get_entities()['bundle']=='CSTleft'])
+hcp_asso_pipeline = 'hcp_association_50pts'
+# hcp_asso_pipeline = 'hcp_association_multiclusters_umapendpoints_50pts'
+csv_files = ds.get_global(pipeline=hcp_asso_pipeline, extension='csv', datatype='metric', suffix='mean')
 
 bundle_names = list(get_HCP_bundle_names().keys())
-#Filter for now to only look at CSTleft
-# bundle_names = ['CSTleft','CSTright']
 
-#corr_variables = ['ami','aes']
-corr_variables=[]
-actimetry = pd.read_excel('/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/actimetry_features.xlsx')
-#Get all column names from actimetry except subject_id and participant_id
-actimetry_columns = [col for col in actimetry.columns if col not in ['subject_id','participant_id']]
+# Variables d'analyse
+corr_variables = []
+classif_variables = {'group': 'with_controls'}  # ,'apathy':'no_controls'}
 
-# corr_variables += actimetry_columns
+confond_variables_with_control = ['age', 'sex', 'city']
+confond_variables_without_control = confond_variables_with_control + ['duration_dep', 'type_dep']
+confond_variables_for_actimetry = confond_variables_with_control + ['group']
 
-classif_variables = {'group':'with_controls','apathy':'no_controls'}
+# Centralisation des chemins et chargement des tables externes avec cache
+_ADDITIONAL_INFO_PATH = f"/home/ndecaux/NAS_EMPENN/share/projects/{dataset}/bids/participants_full_info.xlsx"
+_ACTIMETRY_PATH = f"/home/ndecaux/NAS_EMPENN/share/projects/{dataset}/bids/actimetry_features.xlsx"
+METRIC_COLUMNS_CANDIDATES = ['FA','IFW']
 
-confond_variables_with_control = ['age','sex','city']
-
-confond_variables_without_control = confond_variables_with_control + ['duration_dep','type_dep']
-
-
-# Cache global pour éviter rechargements répétés (limite fuite mémoire)
-_ADDITIONAL_INFO_PATH = "/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/participants_full_info.xlsx"
-_ACTIMETRY_PATH = "/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids/actimetry_features.xlsx"
-try:
-    _ADDITIONAL_INFO_DF = pd.read_excel(_ADDITIONAL_INFO_PATH)
-except Exception as _e:
-    print(f"Warn: impossible de charger participants_full_info.xlsx: {_e}")
-    _ADDITIONAL_INFO_DF = pd.DataFrame()
-try:
-    _ACTIMETRY_DF = pd.read_excel(_ACTIMETRY_PATH)
-except Exception as _e:
-    print(f"Warn: impossible de charger actimetry_features.xlsx: {_e}")
-    _ACTIMETRY_DF = pd.DataFrame()
-
-def load_and_merge_bundle_csvs(bundle_name, bundle_csvs):
-    metric_files_dict = {f.get_full_entities()['subject']: f for f in bundle_csvs}
-
-    #Load all csv files
-    metric_files = [pd.read_csv(f.path) for f in bundle_csvs]
-    #For all dataframe, add a column with the subject id
-    for df, f in zip(metric_files, bundle_csvs):
-        df['subject'] = f.get_full_entities()['subject']
-        df['participant_id'] = 'sub-' + df["subject"].astype(str)  # Assuming subject is a string of digits
-    #Concatenate all dataframes
-    metrics_df = pd.concat(metric_files, ignore_index=True)
-
-    # Merge caches (copies allégées pour éviter chaînes inutiles)
-    if not _ADDITIONAL_INFO_DF.empty:
-        metrics_df = metrics_df.merge(_ADDITIONAL_INFO_DF, on='participant_id', how='left')
-    
-    if not _ACTIMETRY_DF.empty:
-        metrics_df = metrics_df.merge(_ACTIMETRY_DF, on='participant_id', how='left')
-
-    # Libération mémoire intermédiaire
-    del metric_files
-    gc.collect()
-    return metrics_df, metric_files_dict
-
-
-for bundle_name in bundle_names:
-    bundle_csvs = [f for f in csv_files if f.get_entities()['bundle']==bundle_name]
-    
-    bundle_df , bundle_metric_files_dict= load_and_merge_bundle_csvs(bundle_name, bundle_csvs)
-
-import seaborn as sns
-from statsmodels.stats.multitest import multipletests
-from scipy.stats import ttest_ind, pearsonr
-from pathlib import Path
-from joblib import Parallel, delayed
-import multiprocessing
-
-METRIC_COLUMNS_CANDIDATES = ['FA','MD','RD','AD','IFW','IRF']
 CLASSIF_CONFOUND_MAP = {
     'group': confond_variables_with_control,
     'apathy': confond_variables_without_control
 }
 
+@lru_cache(maxsize=1)
+def _load_external_tables(additional_info_path: str, actimetry_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Charge les tables externes (participants, actimétrie) avec gestion d'erreurs et mise en cache."""
+    try:
+        add_df = pd.read_excel(additional_info_path)
+    except Exception as e:
+        print(f"Warn: impossible de charger participants_full_info.xlsx: {e}")
+        add_df = pd.DataFrame()
+    try:
+        act_df = pd.read_excel(actimetry_path)
+    except Exception as e:
+        print(f"Warn: impossible de charger actimetry_features.xlsx: {e}")
+        act_df = pd.DataFrame()
+    return add_df, act_df
+
+_ADDITIONAL_INFO_DF, _ACTIMETRY_DF = _load_external_tables(_ADDITIONAL_INFO_PATH, _ACTIMETRY_PATH)
+actimetry_columns = [c for c in _ACTIMETRY_DF.columns if c not in ['subject_id', 'participant_id']] if not _ACTIMETRY_DF.empty else []
+
+def load_and_merge_bundle_csvs(bundle_name, bundle_csvs):
+    metric_files_dict = {f.get_full_entities()['subject']: f for f in bundle_csvs}
+    metric_files = [pd.read_csv(f.path) for f in bundle_csvs]
+    for df, f in zip(metric_files, bundle_csvs):
+        df['subject'] = f.get_full_entities()['subject']
+        df['participant_id'] = 'sub-' + df["subject"].astype(str)
+    metrics_df = pd.concat(metric_files, ignore_index=True)
+
+    # Ajout des infos externes depuis le cache
+    if not _ADDITIONAL_INFO_DF.empty:
+        metrics_df = metrics_df.merge(_ADDITIONAL_INFO_DF, on='participant_id', how='left')
+    if not _ACTIMETRY_DF.empty:
+        metrics_df = metrics_df.merge(_ACTIMETRY_DF, on='participant_id', how='left')
+
+    del metric_files
+    gc.collect()
+    return metrics_df, metric_files_dict
+
 AFQ_ALPHA = 0.05
-AFQ_NPERM = 5000
+AFQ_NPERM = 1000
 FWE_METHOD = "clusterFWE"
 if FWE_METHOD not in {"alphaFWE", "clusterFWE"}:
     FWE_METHOD = "alphaFWE"
 
 # --- Fallback estimation clusterFWE quand NaN ou <1 ---
-def _estimate_cluster_threshold_group(pivot_values: np.ndarray, y: np.ndarray, alpha=0.05, nperm=1000, random_state=None):
+def _estimate_cluster_threshold_group(pivot_values: np.ndarray, y: np.ndarray, alpha=0.05, nperm=500, random_state=None):
     if random_state is not None:
         rng = np.random.default_rng(random_state)
     else:
@@ -176,7 +118,7 @@ def _estimate_cluster_threshold_group(pivot_values: np.ndarray, y: np.ndarray, a
             v1 = g1[:, j]
             if np.sum(~np.isnan(v0)) >= 2 and np.sum(~np.isnan(v1)) >= 2:
                 try:
-                    _, p = sp_stats.ttest_ind(v0, v1, equal_var=False, nan_policy='omit')
+                    _, p = ttest_ind(v0, v1, equal_var=False, nan_policy='omit')
                 except Exception:
                     p = np.nan
             else:
@@ -213,7 +155,11 @@ def _estimate_cluster_threshold_corr(pivot_values: np.ndarray, y: np.ndarray, al
             mask = ~np.isnan(xv) & ~np.isnan(perm)
             if np.sum(mask) >= 3:
                 try:
-                    r, p = pearsonr(xv[mask], perm[mask])
+                    #If norm(x - mean(x)) < 1e-13 * abs(mean(x)), pearsonr can fail so skip
+                    if np.linalg.norm(xv[mask] - np.mean(xv[mask])) < 1e-13 * abs(np.mean(xv[mask])):
+                        p = np.nan
+                    else:
+                        r, p = pearsonr(xv[mask], perm[mask])
                 except Exception:
                     p = np.nan
             else:
@@ -283,7 +229,7 @@ def ols_residualize(y, X):
         model = sm.OLS(y_clean, Xc).fit()
         resid = model.resid + model.params.get('const', 0.0)
         out = pd.Series(index=y.index, data=np.nan)
-        out.loc[resid.index] = resid
+        out.loc[resid.index] = resid.astype(float)
         return out
     except Exception:
         return y
@@ -417,7 +363,7 @@ def group_test_afq(long_df, classif_col, alpha=AFQ_ALPHA, nperm=AFQ_NPERM):
         vals1 = pivot.loc[y == 1, point].astype(float)
         if vals0.notna().sum() >= 2 and vals1.notna().sum() >= 2:
             try:
-                t, p = sp_stats.ttest_ind(vals0, vals1, equal_var=False, nan_policy='omit')
+                t, p = ttest_ind(vals0, vals1, equal_var=False, nan_policy='omit')
             except Exception:
                 p = np.nan
         else:
@@ -543,7 +489,10 @@ def _correlation_with_alphaFWE(pivot_values: pd.DataFrame, y_vec,
         mask = xv.notna() & y_series.notna()
         if mask.sum() >= 3:
             try:
-                r, p = pearsonr(xv[mask], y_series[mask])
+                if np.linalg.norm(xv[mask] - np.mean(xv[mask])) < 1e-13 * abs(np.mean(xv[mask])):
+                    r, p = np.nan, np.nan
+                else:
+                    r, p = pearsonr(xv[mask], y_series[mask])
             except Exception:
                 r, p = np.nan, np.nan
         else:
@@ -861,7 +810,7 @@ def plot_correlation(corr_df, metric_name, bundle_name, var_name, out_path, titl
 
 # --- Nouveau: worker par variable de classification ---
 def _worker_classif_variable(classif_col, bundle_data, metric_set, report_dir,
-                             AFQ_NPERM=5000, AFQ_ALPHA=0.05, MULTI_BUNDLE_AFQ=False):
+                             AFQ_NPERM=1000, AFQ_ALPHA=0.05, MULTI_BUNDLE_AFQ=False):
     """
     Version simplifiée:
       - RAW: group_test_afq
@@ -1013,7 +962,10 @@ def _worker_corr_variable(var_col, bundle_data, metric_set, report_dir):
                 plot_correlation(corr_raw, metric_col, bundle_label, var_col, out_corr_raw, "(brut)",
                                  removed_subjects, removed_points,
                                  export_csv=True, canonical_bundle=bundle_name, centroid_id=cid)
-                corr_partial = pointwise_partial_correlation(long_df_clean, var_col, confond_variables_with_control)
+                
+                # Utiliser confonds avec 'group' pour actimétrie
+                confonds_to_use = confond_variables_for_actimetry if var_col in actimetry_columns else confond_variables_with_control
+                corr_partial = pointwise_partial_correlation(long_df_clean, var_col, confonds_to_use)
                 out_corr_part = opj(figure_dir, f"{bundle_label}_{metric_col}_{var_col}_corr_partial.png")
                 plot_correlation(corr_partial, metric_col, bundle_label, var_col, out_corr_part,
                                  "(corrigé confond)", removed_subjects, removed_points,
@@ -1045,37 +997,29 @@ def _worker_corr_variable(var_col, bundle_data, metric_set, report_dir):
 def generate_report(bundle_names, csv_files, report_dir="report_output", n_jobs=1):
     """
     Génère le rapport complet.
-    Parallélisation désormais par variable (classification ou corrélation) : chaque worker traite
-    une variable sur l'ensemble des bundles et métriques.
+    Parallélisation par variable (classification / corrélation).
     """
     ensure_dir(report_dir)
     bundle_data = {}
-    bundle_names= list(bundle_names)
+    bundle_names = list(bundle_names)
     print(f"Analyse des bundles: {', '.join(bundle_names)}")
-    # Chargement bundles
-    # (on suppose bundle_names déjà préparé avant l'appel)
-    for bundle_name in tqdm([bn.replace("_","") for bn in bundle_names], desc="Chargement des bundles"):
-        bundle_csvs = [f for f in csv_files if f.get_entities()['bundle']==bundle_name]
+
+    # Chargement des bundles
+    for bundle_name in tqdm([bn.replace("_", "") for bn in bundle_names], desc="Chargement des bundles"):
+        bundle_csvs = [f for f in csv_files if f.get_entities()['bundle'] == bundle_name]
         if not bundle_csvs:
             continue
         df, _ = load_and_merge_bundle_csvs(bundle_name, bundle_csvs)
         bundle_data[bundle_name] = df
-        # Collecte GC périodique
         if len(bundle_data) % 5 == 0:
             gc.collect()
     if not bundle_data:
         print("Aucun bundle à analyser.")
         return
 
-    print(df.head())
-
     # Déterminer toutes les métriques présentes
-    metric_set = set()
-    for df in bundle_data.values():
-        metric_set.update(detect_metric_columns(df))
-    metric_set = sorted(metric_set)
-
-    print(metric_set)
+    metric_set = sorted({m for df in bundle_data.values() for m in detect_metric_columns(df)})
+    print(f"Métriques détectées: {', '.join(metric_set) if metric_set else '(aucune)'}")
 
     # Liste des jobs variables
     var_jobs = [('classif', c) for c in classif_variables.keys()] + [('corr', c) for c in corr_variables]
@@ -1168,52 +1112,11 @@ def generate_report(bundle_names, csv_files, report_dir="report_output", n_jobs=
 
     # Documentation statistique détaillée
     stat_doc_lines = [
-        "# Documentation statistique",
-        "",
-        "Méthode FWE utilisée: " + FWE_METHOD,
-        "",
-        "Si clusterFWE: n_sig = nombre de clusters (non pas de points); colonne clusterFWE_* = taille minimale de cluster significatif.",
-        "",
-        "## 1. Préparation des données",
-        "Pour chaque bundle et chaque métrique scalaire tractométrique (FA, MD, RD, AD, IFW, IRF si présentes):",
-        "- Fusion des CSV sujets + métadonnées cliniques/démographiques + actimétrie. Conversion en format long: colonnes `subject`, `point`, `value` (métrique) + variables explicatives.",
-        "",
-        "### Gestion des données manquantes",
-        "1. Construction d'un tableau sujets x points.",
-        "2. Suppression des points avec proportion de valeurs manquantes >= 15%.",
-        "3. Suppression des sujets contenant encore des NaN sur les points conservés.",
-        "Ces exclusions sont annotées sur chaque figure.",
-        "",
-        "## 2. Comparaisons de groupes",
-        "Pour chaque variable de classification (ex: `group`, `apathy`). Deux méthodes possibles :",
-        "- alphaFWE: seuil global alphaFWE (permutations) et significativité si p_raw < alphaFWE.",
-        "- clusterFWE: un cluster de p_raw < alpha (non corrigé, alpha={AFQ_ALPHA}) d'une longueur >= clusterFWE est déclaré significatif.",
-        f"Méthode utilisée dans ce rapport: {FWE_METHOD}.",
-        "Deux analyses: (i) brute; (ii) corrigée des confondants.",
-        "",
-        "### Correction des confondants",
-        "Résidualisation point-par-point sur les confondants via OLS (résidus + intercept).",
-        "",
-        "## 3. Corrélations",
-        "Même logique que pour les groupes: alphaFWE ou clusterFWE selon la méthode choisie.",
-        "Courbes: r, barres p_raw, seuil / info FWE selon méthode.",
-        "",
-        "## 4. Résidualisation",
-        "Encodage catégoriel -> codes entiers; suppression lignes incomplètes dans le modèle OLS.",
-        "",
-        "## 5. Interprétation des tracés",
-        "Ligne rouge pointillée (alphaFWE) ou annotation clusterFWE (longueur minimale du cluster).",
-        "Segments rouges (ligne haute) indiquent les points ou clusters significatifs.",
-        "",
-        "## 6. Limitations",
-        "Hypothèses de normalité approximative; indépendance des sujets; taille d'échantillon réduite possible.",
-        "La méthode clusterFWE peut ignorer des effets très ponctuels; alphaFWE peut fragmenter des effets étendus.",
-    ]
+        "TODO"]
     stat_doc_path = opj(report_dir, 'statistics_methodology.md')
     with open(stat_doc_path, 'w') as f:
         f.write('\n'.join(stat_doc_lines))
     print(f"Documentation statistique: {stat_doc_path}")
-
 
 def test_report(bundle_names, csv_files):
     """
@@ -1264,21 +1167,48 @@ for bundle_name in bundle_names:
     bundle_df, bundle_metric_files_dict = load_and_merge_bundle_csvs(bundle_name, bundle_csvs)
     bundles_loaded[bundle_name] = bundle_df
 
-pipeline="no_actimetry"
-#get hostname
-hostname = os.uname().nodename
-print(f"Hostname: {hostname}")
-n_jobs=1
-output_dir = f'/home/ndecaux/report_{hcp_asso_pipeline}_{pipeline}_{FWE_METHOD}'
-classif_variables = {'group':'with_controls'}
-if hostname=='calcarine':
-    # pipeline="tout"
-    # corr_variables+=actimetry_columns
-    # classif_variables={}
-    output_dir = f'/data/ndecaux/report_{hcp_asso_pipeline}_{pipeline}_calcarine'
-    n_jobs=32
-os.makedirs(output_dir, exist_ok=True)
-print(f"Rapport dans {output_dir}")
-# Lancer l’analyse complête (adapter pour parallélisation)
-generate_report(bundles_loaded.keys(), csv_files, report_dir=output_dir, n_jobs=n_jobs)
-# test_report(bundles_loaded.keys(), csv_files)
+# pipeline="no_actimetry"
+# #get hostname
+# hostname = os.uname().nodename
+# print(f"Hostname: {hostname}")
+# n_jobs=12
+# output_dir = f'/home/ndecaux/report_{dataset}_{hcp_asso_pipeline}_{pipeline}_{FWE_METHOD}'
+# classif_variables = {'group':'with_controls'}
+# if hostname=='calcarine':
+#     # pipeline="tout"
+#     # corr_variables+=actimetry_columns
+#     # classif_variables={}
+#     output_dir = f'/data/ndecaux/report_{hcp_asso_pipeline}_{pipeline}_calcarine'
+#     n_jobs=32
+# os.makedirs(output_dir, exist_ok=True)
+# print(f"Rapport dans {output_dir}")
+# # Lancer l’analyse complête (adapter pour parallélisation)
+# generate_report(bundles_loaded.keys(), csv_files, report_dir=output_dir, n_jobs=n_jobs)
+# # test_report(bundles_loaded.keys(), csv_files)
+
+def main():
+    pipeline = "actimetry2"
+
+    if 'actimetry' in pipeline:
+        corr_variables.extend(actimetry_columns)
+        classif_variables.clear()
+
+    hostname = os.uname().nodename
+    print(f"Hostname: {hostname}")
+
+    n_jobs = os.cpu_count() - 1
+    out_base = f'/home/ndecaux'
+    output_dir = f'{out_base}/report_{dataset}_{hcp_asso_pipeline}_{pipeline}_{FWE_METHOD}'
+
+    if hostname == 'calcarine':
+        output_dir = f'/data/ndecaux/report_{hcp_asso_pipeline}_{pipeline}_calcarine'
+        n_jobs = 32
+
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"Rapport dans {output_dir}")
+
+    # Lancer l’analyse complète (sans pré-chargement redondant)
+    generate_report(bundle_names, csv_files, report_dir=output_dir, n_jobs=n_jobs)
+
+if __name__ == "__main__":
+    main()

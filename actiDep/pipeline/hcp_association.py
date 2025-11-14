@@ -445,7 +445,7 @@ def process_hcp_association(subject,pipeline=pipeline,n_pts=50):
 
 if __name__ == "__main__":
     # If hostname is calcarine, set tempdir to /local/ndecaux/tmp
-    n_proc=1
+    n_proc=12
     if os.uname()[1] == 'calcarine':
         tempfile.tempdir = '/local/ndecaux/tmp'
         n_proc=32
@@ -456,7 +456,7 @@ if __name__ == "__main__":
     print('Reading dataset')
     # db_root = '/home/ndecaux/Code/Data/dysdiago'
     # db_root = '/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids'
-    db_root="/home/ndecaux/NAS_EMPENN/share/projects/amynet/bids"
+    db_root="/home/ndecaux/NAS_EMPENN/share/projects/actidep/bids"
     ds = Actidep(db_root)
     print(f"Found {len(ds.subject_ids)} subjects")
     print("=====================================")
@@ -493,6 +493,6 @@ if __name__ == "__main__":
 
     # Use multiprocessing to process subjects in parallel
     with multiprocessing.Pool(n_proc) as pool:
-        pool.map(process_one_subject, ds.subject_ids)  # Replace with ds.subject_ids for all subjects
+        pool.map(process_one_subject, ['01001'])# ds.subject_ids)  # Replace with ds.subject_ids for all subjects
     print("HCP Association pipeline completed")
 

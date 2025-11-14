@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Pipeline de traitement de la base Actidep"
 authors = ["Votre Nom <votre.email@example.com>"]
 license = "MIT"
+packages = [
+    { include = "actiDep" }
+]
 
 [tool.poetry.dependencies]
 python = "^3.8"
